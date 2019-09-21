@@ -8,6 +8,25 @@ This project is currently in ALPHA status. Feedback welcome.
 Still new at this so if I'm breaking conventions or etiquette please let me know.
 
 Usage:
+```
+Usage: ./ss_client [-options] <mode> [iq_outfile] [fft_outfile]
+
+  mode: one of  iq | fft | both
+  -f <center frequency>
+  -s <sample_rate>
+  [-b <bits>, '8' or '16', default 16; 8 is EXPERIMENTAL]
+  [-d <digital gain> - experimental, 0.0 .. 1.0]
+  [-e <fft resolution> default 100Hz target]
+  [-g <gain>]
+  [-i  <integration interval for fft data> (default: 10 seconds)]
+  [-r <server>]
+  [-p <port>]
+  [-n <num_samples>]
+  [<iq outfile name>] ( '-' for stdout; optional, but must be specified if an fft outfilename is also provided)
+  [<fft outfile name>] default log_power.csv
+```
+
+Examples:
 
 Stream 16-bit signed complex samples at 78125sps with receiver gain of 18:
 ```
