@@ -37,6 +37,7 @@ void usage(char* appname) {
                 << "\n  -s <sample_rate>"
                 << "\n  [-b <bits>, '8' or '16', default 16; 8 is EXPERIMENTAL]"
                 << "\n  [-d <digital gain> - experimental, 0.0 .. 1.0]"
+                << "\n  [-e <fft resolution> default 100Hz target]"
                 << "\n  [-g <gain>]"
                 << "\n  [-i  <integration interval for fft data> (default: 10 seconds)]"
                 << "\n  [-r <server>]"
@@ -69,8 +70,9 @@ void parse_args(int argc, char* argv[], SettingsT& settings)
    settings.sample_bits = 16;
    
    int opt;
+   double fft_resolution = 100;
    
-	while ((opt = getopt(argc, argv, "b:d:f:g:i:n:p:r:s:h1")) != -1) {
+	while ((opt = getopt(argc, argv, "b:d:e:f:g:i:n:p:r:s:h1")) != -1) {
 		switch (opt) {
 		case 'b': // sample_bits
          settings.sample_bits = atoi(optarg);
@@ -85,6 +87,9 @@ void parse_args(int argc, char* argv[], SettingsT& settings)
          break;
       case 'd': // digital gain
          settings.dig_gain = strtod(optarg, NULL);
+         break;
+      case 'e': // fft resolution
+         fft_resolution = strtod(optarg, NULL);
          break;
       case 'f': // frequency
          settings.center_freq = strtod(optarg, NULL);
@@ -162,7 +167,13 @@ void parse_args(int argc, char* argv[], SettingsT& settings)
       std::cerr << "Refusing to emit both samples and fft data to the same output stream! :-p\n";
       usage(argv[0]);
       exit(1);      
-   }	
+   }
+
+   // adjust fft size to provide requested resolution
+   int bins_for_100_hz =  settings.sample_rate / fft_resolution;
+   settings.fft_bins = std::pow(2, std::ceil(std::log(bins_for_100_hz)) + 2);
+   std::cerr << "fft bins: " << settings.fft_bins << " resolution: "
+      << settings.sample_rate / settings.fft_bins << "Hz" << std::endl;
 }
 
 
