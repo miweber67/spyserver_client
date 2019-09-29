@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <string>
 
 #include <getopt.h>
 
@@ -50,8 +51,25 @@ void usage(char* appname) {
    }
 }
 
-void parse_args(int argc, char* argv[], SettingsT& settings)
-{
+void parse_freq_arg(SettingsT& settings, double& fft_res, char* arg) {
+   std::string s (arg);
+   if( s.find(':') != std::string::npos ) {
+      std::stringstream ss (s);
+      int low;
+      int high;
+      int res;
+      char c;
+      ss >> low >> c >> high >> c >> res;
+      settings.center_freq = (low + high) / 2;
+      fft_res = res;
+   } else {
+      settings.center_freq = strtod(arg, NULL);
+   }
+
+//   std::cerr << "center_freq: " << settings.center_freq << "   fft_res: " << fft_res << std::endl;
+}
+
+void parse_args(int argc, char* argv[], SettingsT& settings) {
 
    settings.center_freq = 403000000;
    settings.sample_rate = 10000000;
@@ -72,6 +90,8 @@ void parse_args(int argc, char* argv[], SettingsT& settings)
    int opt;
    double fft_resolution = 100;
    
+   // Need to accept rtl_power-style args.
+   // Example: rtl_power -f 400400000:403500000:800 -i20 -1 -c 20% -p 0 -d 0 -g 26.0 log_power.csv
 	while ((opt = getopt(argc, argv, "b:d:e:f:g:i:n:p:r:s:h1")) != -1) {
 		switch (opt) {
 		case 'b': // sample_bits
@@ -92,7 +112,8 @@ void parse_args(int argc, char* argv[], SettingsT& settings)
          fft_resolution = strtod(optarg, NULL);
          break;
       case 'f': // frequency
-         settings.center_freq = strtod(optarg, NULL);
+         // accommodate rtl_power-style frequency range string
+         parse_freq_arg(settings, fft_resolution, optarg);
          break;
       case 's': // sampling rate
          settings.sample_rate = strtod(optarg, NULL);
@@ -170,10 +191,15 @@ void parse_args(int argc, char* argv[], SettingsT& settings)
    }
 
    // adjust fft size to provide requested resolution
-   int bins_for_100_hz =  settings.sample_rate / fft_resolution;
-   settings.fft_bins = std::pow(2, std::ceil(std::log(bins_for_100_hz)) + 2);
-   std::cerr << "fft bins: " << settings.fft_bins << " resolution: "
-      << settings.sample_rate / settings.fft_bins << "Hz" << std::endl;
+   int bins_for_res =  settings.sample_rate / fft_resolution;
+   settings.fft_bins = std::pow(2, std::ceil(std::log2(bins_for_res)));
+   if( settings.fft_bins > 65536 ) {
+      // max bins spyserver allows
+      settings.fft_bins = 65536;
+   }
+//   std::cerr << "bits for bins: " << std::ceil(std::log2(bins_for_res)) << std::endl;
+//   std::cerr << "bins for res: " << bins_for_res << "   fft bins: " << settings.fft_bins << "   resolution: "
+//      << settings.sample_rate / settings.fft_bins << "Hz" << std::endl;
 }
 
 
