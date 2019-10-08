@@ -14,16 +14,18 @@ Usage: ./ss_client [-options] <mode> [iq_outfile] [fft_outfile]
   mode: one of  iq | fft | both
   -f <center frequency>
   -s <sample_rate>
-  [-b <bits>, '8' or '16', default 16; 8 is EXPERIMENTAL]
-  [-d <digital gain> - experimental, 0.0 .. 1.0]
+  [-j <digital gain> - experimental, 0.0 .. 1.0]
   [-e <fft resolution> default 100Hz target]
   [-g <gain>]
   [-i  <integration interval for fft data> (default: 10 seconds)]
   [-r <server>]
-  [-p <port>]
+  [-q <port>]
   [-n <num_samples>]
   [<iq outfile name>] ( '-' for stdout; optional, but must be specified if an fft outfilename is also provided)
   [<fft outfile name>] default log_power.csv
+NB: invoke as 'ss_power' for fft-only use with rtl_power compatible command line options
+    invoke as 'ss_iq' for iq-only use 
+
 ```
 
 Examples:
@@ -42,3 +44,9 @@ Stream complex samples to sdtout and spectrum power to log_power.csv every 10s:
 ```
 ./ss_client both -f 403000000 -s 78125 -i 10 -e 800 - log_power.csv
 ```
+
+
+----
+Compatibility with radiosonde_auto_rx is improving...
+
+![spectrum sample](spectrum.png)
