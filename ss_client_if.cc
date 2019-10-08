@@ -661,13 +661,7 @@ double ss_client_if::set_sample_rate(double sampleRate) {
    uint32_t requested_idx = 0xFFFFFFFF;
 
    if (sampleRate <= 0xFFFFFFFF) {
-      uint32_t min_idx = 0;
-      double min_rate = 0xFFFFFFFF;
       for (unsigned int i=0; i<_sample_rates.size(); i++) {
-         if( min_rate > _sample_rates[i].first ) {
-            min_rate = _sample_rates[i].first;
-            min_idx = i;
-         }
          if (_sample_rates[i].first == sampleRate) {
             requested_idx = i;
          }
@@ -683,11 +677,11 @@ double ss_client_if::set_sample_rate(double sampleRate) {
             // However, spyserver does not appear to provide high-rate fft and
             // low-rate IQ simultaneously. You must request as much IQ as you
             // want FFT data. :-(
-            double iq_rate = _sample_rates[min_idx].first;
+            double iq_rate = _sample_rates[_sample_rates.size() - 1].first;
 //            set_setting(SETTING_IQ_DECIMATION, {_sample_rates[min_idx].second} );
             set_setting(SETTING_IQ_DECIMATION, {_sample_rates[requested_idx].second} );
             m_iq_sample_rate = iq_rate;
-            std::cerr << "SS_client_if: Setting IQ sample rate to " << iq_rate << std::endl;
+            std::cerr << "SS_client_if: Setting fft-only IQ sample rate to " << iq_rate << std::endl;
       }
 
       if( m_do_fft && requested_idx < _sample_rates.size() ) {
@@ -710,6 +704,8 @@ double ss_client_if::set_sample_rate(double sampleRate) {
       throw std::runtime_error( ss.str() );   
    }
 
+   set_setting(SETTING_FFT_DISPLAY_PIXELS, { m_fft_bins });
+   
    return get_sample_rate();
 }
 
@@ -740,6 +736,8 @@ void ss_client_if::process_uint8_fft() {
 
    size_t num_pts = header.BodySize;
    uint8_t* val = (uint8_t*)body_buffer;
+
+//   std::cerr << "Got " << num_pts << " FFT points\n";
 
    m_fft_data_lock.lock();
    for (size_t i = 0; i < num_pts; ++i)

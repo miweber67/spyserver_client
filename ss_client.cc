@@ -36,16 +36,19 @@ void usage(char* appname) {
                 << "\n  mode: one of  iq | fft | both"
                 << "\n  -f <center frequency>"
                 << "\n  -s <sample_rate>"
-                << "\n  [-b <bits>, '8' or '16', default 16; 8 is EXPERIMENTAL]"
-                << "\n  [-d <digital gain> - experimental, 0.0 .. 1.0]"
+//                << "\n  [-b <bits>, '8' or '16', default 16; 8 is EXPERIMENTAL]"
+                << "\n  [-j <digital gain> - experimental, 0.0 .. 1.0]"
                 << "\n  [-e <fft resolution> default 100Hz target]"
                 << "\n  [-g <gain>]"
                 << "\n  [-i  <integration interval for fft data> (default: 10 seconds)]"
                 << "\n  [-r <server>]"
-                << "\n  [-p <port>]"
+                << "\n  [-q <port>]"
                 << "\n  [-n <num_samples>]"
                 << "\n  [<iq outfile name>] ( '-' for stdout; optional, but must be specified if an fft outfilename is also provided)"
                 << "\n  [<fft outfile name>] default log_power.csv"
+                << std::endl
+                << "NB: invoke as 'ss_power' for fft-only use with rtl_power compatible command line options"
+                << "\n    invoke as 'ss_iq' for iq-only use "
                 << std::endl;
       printed = true;
    }
@@ -92,7 +95,7 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
    
    // Need to accept rtl_power-style args.
    // Example: rtl_power -f 400400000:403500000:800 -i20 -1 -c 20% -p 0 -d 0 -g 26.0 log_power.csv
-	while ((opt = getopt(argc, argv, "b:d:e:f:g:i:n:p:r:s:h1")) != -1) {
+	while ((opt = getopt(argc, argv, "b:c:d:e:f:F:g:i:j:M:n:p:q:r:s:h1")) != -1) {
 		switch (opt) {
 		case 'b': // sample_bits
          settings.sample_bits = atoi(optarg);
@@ -102,11 +105,11 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
             exit(0);
          }
          break;
-      case '1': // digital gain
+      case '1': // one-shot mode, quit after first report
          settings.oneshot = 1;
          break;
-      case 'd': // digital gain
-         settings.dig_gain = strtod(optarg, NULL);
+      case 'c': // chop n% of edges - not supported
+         std::cerr << "-c not currently supported; ignoring\n";
          break;
       case 'e': // fft resolution
          fft_resolution = strtod(optarg, NULL);
@@ -115,27 +118,39 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
          // accommodate rtl_power-style frequency range string
          parse_freq_arg(settings, fft_resolution, optarg);
          break;
-      case 's': // sampling rate
-         settings.sample_rate = strtod(optarg, NULL);
+      case 'F':
+         std::cerr << "-F not currently supported; ignoring\n";
          break;
       case 'g': // gain
 	      settings.gain = strtod(optarg, NULL);
 	      break;
-      case 'r': // seRveR
-	      settings.server = strdup(optarg);
+      case 'i': // integration interval
+	      settings.fft_average_seconds = atoi(optarg);
+	      break;
+      case 'j': // digital gain
+         settings.dig_gain = strtod(optarg, NULL);
+         break;
+      case 'M': // # ignore
+         std::cerr << "-M not currently supported; ignoring\n";
 	      break;
       case 'n': // # samples
 	      settings.samples = strtol(optarg, NULL, 0);
 	      break;
-      case 'p': // port
+      case 'p': // ppm error - not supported
+         std::cerr << "-p not currently supported; ignoring\n";
+	      break;
+      case 'q': // port
 	      settings.port = atoi(optarg);
 	      break;
-      case 'i': // integration interval
-	      settings.fft_average_seconds = atoi(optarg);
+      case 'r': // seRveR
+	      settings.server = strdup(optarg);
 	      break;
-      case 't': // do FFT
-	      settings.do_fft = 1;
-	      break;
+      case 's': // sampling rate
+         settings.sample_rate = strtod(optarg, NULL);
+         break;
+//      case 't': // do FFT
+//	      settings.do_fft = 1;
+//	      break;
       case 'h': // help
 	      usage(argv[0]);
 	      exit(0);
@@ -146,24 +161,49 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
       }
 	} // end arg flags
 
+   std::cerr << "optind now " << optind << "  argc: " << argc << std::endl;
+
    bool got_mode_string = false;	
-   if(optind < argc) {
-      if( 0 == strcmp("iq", argv[optind]) ) {
-	      settings.do_iq = 1;
-	      got_mode_string = true;
-	   } else if( 0 == strcmp("fft", argv[optind]) ) {
-	      settings.do_fft = 1;
-	      got_mode_string = true;
-	   } else if( 0 == strcmp("both", argv[optind]) ) {
-	      settings.do_iq = 1;
-	      settings.do_fft = 1;
-	      got_mode_string = true;
-	   } else {
-	      std::cerr << "Unrecognized mode string '" << argv[optind] << "'\n";
-		   usage(argv[0]);
-		   exit(0);
-	   }
-	   
+
+   std::cerr << "Checking argv0: " << argv[0] << std::endl;
+
+   // check invocation context
+   if( 0 != strstr(argv[0], "ss_power") ) {
+      // assume fft-only
+      settings.do_fft = 1;
+      if( optind < argc ) {
+   	   settings.fft_outfilename = argv[optind];
+   	   optind++;
+   	}
+      std::cerr << "fft filename: " << settings.fft_outfilename << std::endl;
+      got_mode_string = true;
+   } else if( 0 != strstr(argv[0], "ss_iq") ) {
+      // assume iq-only
+      settings.do_iq = 1;
+      if( optind < argc ) {
+   	   settings.samples_outfilename = argv[optind];
+   	   optind++;
+   	}
+      got_mode_string = true;
+   } else {
+      if(optind < argc) {
+         if( 0 == strcmp("iq", argv[optind]) ) {
+	         settings.do_iq = 1;
+	         got_mode_string = true;
+	      } else if( 0 == strcmp("fft", argv[optind]) ) {
+	         settings.do_fft = 1;
+	         got_mode_string = true;
+	      } else if( 0 == strcmp("both", argv[optind]) ) {
+	         settings.do_iq = 1;
+	         settings.do_fft = 1;
+	         got_mode_string = true;
+	      } else {
+            std::cerr << "Unrecognized mode string '" << argv[optind] << "'\n";
+            usage(argv[0]);
+            exit(0);
+	      }
+      }
+   
 	   ++optind;
    } 
    
@@ -174,15 +214,33 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
 	   exit(0);
    }   
 
-	if(optind < argc) {
-	   settings.samples_outfilename = argv[optind];
+   std::cerr << "optind now " << optind << "  argc: " << argc << std::endl;
+   
+	if(optind == argc - 1) {
+	   // only one filename provided
+	   if( settings.do_iq == 1 ) {
+	      // iq filename provided, default fft filename to be used
+   	   settings.samples_outfilename = argv[optind];
+         std::cerr << "iq filename: " << settings.samples_outfilename << std::endl;
+	   } else if( settings.do_fft == 1 ) {
+	      // no iq requested, fft requested, 1 filename --> fft filename
+   	   settings.fft_outfilename = argv[optind];	      
+         std::cerr << "fft filename: " << settings.fft_outfilename << std::endl;
+	   }
 	   ++optind;
+	} else if( optind < argc ) {
+	   // two filenames provided
+	   if(optind < argc) {
+   	   settings.samples_outfilename = argv[optind];
+	      ++optind;
+         std::cerr << "iq filename: " << settings.samples_outfilename << std::endl;
+	      settings.fft_outfilename = argv[optind];
+	      ++optind;
+         std::cerr << "fft filename: " << settings.fft_outfilename << std::endl;
+	   }
+	
 	}
-
-	if(optind < argc) {
-	   settings.fft_outfilename = argv[optind];
-	   ++optind;
-	}
+   
 	
    if( 0 == strcmp(settings.samples_outfilename, settings.fft_outfilename) ) {
       std::cerr << "Refusing to emit both samples and fft data to the same output stream! :-p\n";
@@ -193,13 +251,14 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
    // adjust fft size to provide requested resolution
    int bins_for_res =  settings.sample_rate / fft_resolution;
    settings.fft_bins = std::pow(2, std::ceil(std::log2(bins_for_res)));
-   if( settings.fft_bins > 65536 ) {
-      // max bins spyserver allows
-      settings.fft_bins = 65536;
+   // max bins spyserver allows
+   const int max = 32768;
+   if( settings.fft_bins > max ) {
+      settings.fft_bins = max;
    }
-//   std::cerr << "bits for bins: " << std::ceil(std::log2(bins_for_res)) << std::endl;
-//   std::cerr << "bins for res: " << bins_for_res << "   fft bins: " << settings.fft_bins << "   resolution: "
-//      << settings.sample_rate / settings.fft_bins << "Hz" << std::endl;
+   std::cerr << "bits for bins: " << std::ceil(std::log2(bins_for_res)) << std::endl;
+   std::cerr << "bins for res: " << bins_for_res << "   fft bins: " << settings.fft_bins << "   resolution: "
+      << settings.sample_rate / settings.fft_bins << "Hz" << std::endl;
 }
 
 
@@ -224,8 +283,10 @@ void fft_work_thread( ss_client_if& server,
    int periods = 0;
    std::vector<uint32_t> fft_data_sums;
    int sum_periods = 0;
-   double hz_low = settings.center_freq - (settings.sample_rate / 2.0);
-   double hz_high = settings.center_freq + (settings.sample_rate / 2.0);
+   // spyserver trims edges of fft; you don't get the whole thing. Exact percentage tbd
+   const double bw_trim = 0.80;
+   double hz_low = settings.center_freq - (settings.sample_rate * bw_trim / 2.0) ;
+   double hz_high = settings.center_freq + (settings.sample_rate * bw_trim / 2.0);
 
    std::cerr << "fft_work_thread: center_freq: " << settings.center_freq
              << "                 sample_rate: " << settings.sample_rate
@@ -244,7 +305,7 @@ void fft_work_thread( ss_client_if& server,
       
 //      std::cerr << "fft_work_thread got some data with " << periods << " periods\n";
 
-      double hz_step = settings.sample_rate / fft_data.size();
+      double hz_step = settings.sample_rate * bw_trim / fft_data.size();
       // TODO: Configure fft bins in source interface and these sizes up front
       if( fft_data_sums.size() < fft_data.size() ) {
          fft_data_sums.resize(fft_data.size());
@@ -271,7 +332,7 @@ void fft_work_thread( ss_client_if& server,
          outfile << "date, time, " << hz_low << ", "
                  << hz_high << ", "
                  << hz_step << ", "
-                 << "samples" << ", ";
+                 << "1" << ", ";
                  
          size_t num_pts = fft_data_sums.size();
          for (size_t i = 0; i < num_pts; ++i)
