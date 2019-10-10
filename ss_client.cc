@@ -4,6 +4,8 @@
 
 #include <getopt.h>
 
+#include <samplerate.h>
+
 #include "tcp_client.h"
 #include "ss_client_if.h"
 
@@ -23,6 +25,7 @@ typedef struct settings {
    uint8_t do_fft;
    uint8_t oneshot;
    uint8_t sample_bits;
+   uint32_t output_rate;
    
 } SettingsT;
 
@@ -89,6 +92,7 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
    settings.fft_outfilename = strdup("log_power.csv");
    settings.oneshot = 0;
    settings.sample_bits = 16;
+   settings.output_rate = 48000;
    
    int opt;
    double fft_resolution = 100;
@@ -110,6 +114,8 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
          break;
       case 'c': // chop n% of edges - not supported
          std::cerr << "-c not currently supported; ignoring\n";
+         break;
+      case 'd': // ignore device spec
          break;
       case 'e': // fft resolution
          fft_resolution = strtod(optarg, NULL);
@@ -147,6 +153,7 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
 	      break;
       case 's': // sampling rate
          settings.sample_rate = strtod(optarg, NULL);
+         settings.output_rate = settings.sample_rate;
          break;
 //      case 't': // do FFT
 //	      settings.do_fft = 1;
@@ -367,11 +374,47 @@ int main(int argc, char* argv[]) {
    const unsigned int batch_sz = 32768;
    unsigned int rxd = 0;
    SettingsT settings;
-   
+   // resampler support   
+//   int16_t*   out_short = NULL;
+   float*     in_f = NULL;
+   float*     out_f = NULL;
+   SRC_STATE* resampler = NULL;
+   SRC_DATA   data;
+
    parse_args(argc, argv, settings);
       
    ss_client_if server (settings.server, settings.port, settings.do_iq, settings.do_fft, settings.fft_bins, settings.sample_bits);
 
+
+   // Get sample rate info and decide which one to ask for; set up resampler if needed
+   uint32_t max_samp_rate;
+   uint32_t decim_stages;
+   int desired_decim_stage = -1;
+   double resample_ratio = 1.0; //  output rate / input rate where output rate is requested rate and input rate is next highest available rate
+   server.get_sampling_info(max_samp_rate, decim_stages);
+   if( max_samp_rate > 0 ) {
+      // see if any of the available rates match the requested rate
+      for( unsigned int i = 0; i < decim_stages; ++i ) {
+         unsigned int cand_rate = (unsigned int)(max_samp_rate / (1 << i));
+         if( cand_rate == (unsigned int)(settings.output_rate) ) {
+            desired_decim_stage = i;
+            resample_ratio = settings.output_rate / (double)cand_rate;
+            std::cerr << "Exact decimation match\n";
+            break;
+         } else if( cand_rate > (unsigned int)(settings.output_rate) ) {
+            // remember the next-largest rate that is available
+            desired_decim_stage = i;
+            resample_ratio = settings.output_rate / (double)cand_rate;
+            settings.sample_rate = cand_rate;
+         }
+      }
+      
+      std::cerr << "Desired decimation stage: " << desired_decim_stage
+         << " (" << max_samp_rate << " / " << (1 << desired_decim_stage)
+         << " = " << max_samp_rate / (1 << desired_decim_stage) << ") resample ratio: "
+         << resample_ratio << std::endl;
+   }
+   
    std::cerr << "ss_client: setting center_freq to " << settings.center_freq << std::endl;
    if(!server.set_center_freq(settings.center_freq)) {
       std::cerr << "Failed to set freq\n";
@@ -388,10 +431,38 @@ int main(int argc, char* argv[]) {
       exit(1);
    }
  
-   if(!server.set_sample_rate(settings.sample_rate)) {
+   if(!server.set_sample_rate_by_decim_stage(desired_decim_stage)) {
       std::cerr << "Failed to set sample rate\n";
       exit(1);
    }
+
+
+    // if the resample_ratio is not 1, we need a resampler.
+//   int16_t* out_short;
+//  float*   in_f
+//   float*   out_f;
+//   SRC_STATE  *src;
+//   SRC_DATA    data;
+   data.output_frames_gen = batch_sz;
+
+   if( resample_ratio != 1.0 ) {
+      in_f = new float[batch_sz*2];
+      out_f = new float[batch_sz*2];
+
+      data.data_in = in_f;
+      data.data_out = out_f;
+      data.end_of_input = 0;
+      data.output_frames = batch_sz;
+      data.src_ratio = resample_ratio;
+      int error;
+      resampler = src_new(SRC_SINC_BEST_QUALITY, 2, &error);
+      if( NULL == resampler ) {
+         std::cerr << "Resampler error: " << src_strerror(error) << std::endl;
+         exit(1);
+      }
+   }
+
+   int         error;
 
    server.start();
 
@@ -417,11 +488,41 @@ int main(int argc, char* argv[]) {
       
       if(settings.sample_bits == 16) {
          // 16-bit samples
+         unsigned int samps;
          // each 'sample' is 2 bytes I + 2 bytes Q
-         char* data = new char[batch_sz*2*2];
+         char* buf = new char[batch_sz*2*2];
+         unsigned int unused = 0;
+         unsigned int available = batch_sz;
          while(settings.samples == 0 || rxd < settings.samples) {
-            rxd += server.get_iq_data(batch_sz,(int16_t*)data);
-            out->write(data, batch_sz*2*2);
+            samps = server.get_iq_data(available,((int16_t*)buf)+unused);
+//            std::cerr << "Asked for " << available << " got " << samps << " samples from server" << std::endl;
+            if( resampler != NULL ) {
+//               std::cerr << "converting buffer to floats\n";
+               src_short_to_float_array ((int16_t*)buf, data.data_in, samps*2);
+               data.input_frames = samps;
+               error = src_process(resampler, &data);
+               if( 0 != error ) {
+                  std::cerr << "Resampler process error: " << src_strerror(error) << std::endl;
+                  exit(1);
+               }
+//               std::cerr << "Resampler read " << data.input_frames_used << " and produced "
+//                 << data.output_frames_gen << std::endl;
+//               std::cerr << "converting float buffer to shorts\n";
+               src_float_to_short_array(data.data_out, (int16_t*)buf, data.output_frames_gen*2);
+               unused = data.input_frames - data.input_frames_used;
+               available = batch_sz - unused;
+//               std::cerr << "unused: " << unused  << " available: " << available << std::endl;
+               // move unused to beginning of buffer
+               uint16_t* s_buf = (uint16_t*)buf;
+//               std::cerr << "Moving unused input data to front of buffer\n";
+               for( unsigned int i = 0; i < unused; ++i ) {
+                  s_buf[i] = s_buf[data.input_frames_used + i];
+               }
+            }
+
+            rxd += data.output_frames_gen;
+            
+            out->write(buf, data.output_frames_gen*2*2);
 //            std::cerr << "w16 " << std::flush;
          }
       } else {
@@ -429,7 +530,7 @@ int main(int argc, char* argv[]) {
          char* data = new char[batch_sz*2];
          while(settings.samples == 0 || rxd < settings.samples) {
             rxd += server.get_iq_data(batch_sz,(uint8_t*)data);
-            out->write(data, batch_sz);
+            out->write(data, batch_sz*2);
 //            std::cerr << "w8 " << std::flush;
          }
       }

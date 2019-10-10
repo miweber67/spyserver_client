@@ -56,18 +56,14 @@ public:
    int get_iq_data( const int batch_size, T* output_items );
    
    void get_fft_data( std::vector<uint32_t>& outdata, int& outperiods );
-
-//   static std::vector< std::string > get_devices(bool fake = false);
-
-//   size_t get_num_channels( void );
+   void get_sampling_info( uint32_t& max_rate, uint32_t& decim_stages );
 
    double set_sample_rate( double rate );
+   double set_sample_rate_by_decim_stage(const uint32_t decim_stage);
    double get_sample_rate( void );
 
    double set_center_freq( double freq, size_t chan = 0 );
    double get_center_freq( size_t chan = 0 );
-//   double set_freq_corr( double ppm, size_t chan = 0 );
-//   double get_freq_corr( size_t chan = 0 );
 
    std::vector<std::string> get_gain_names( size_t chan = 0 );
    bool set_gain_mode( bool automatic, size_t chan = 0 );
@@ -77,20 +73,6 @@ public:
    double get_gain( size_t chan = 0 );
    double get_gain( const std::string & name, size_t chan = 0 );
 
-//   double set_lna_gain( double gain, size_t chan = 0 );
-//   double set_mix_gain(double gain, size_t chan = 0 );
-//   double set_if_gain( double gain, size_t chan = 0 );
-//   double set_bb_gain( double gain, size_t chan = 0 ) { return set_mix_gain(gain, chan); };
-
-//   std::vector< std::string > get_antennas( size_t chan = 0 );
-//   std::string set_antenna( const std::string & antenna, size_t chan = 0 );
-//   std::string get_antenna( size_t chan = 0 );
-
-//   double set_bandwidth( double bandwidth, size_t chan = 0 );
-//   double get_bandwidth( size_t chan = 0 );
-
-//   void set_biast( bool enabled );
-//   bool get_biast();
 
 private:
    static constexpr unsigned int BufferSize = 64 * 1024;
@@ -129,6 +111,7 @@ private:
    void process_uint8_fft();
    void handle_new_message();
    void set_stream_state();
+   double set_sample_rate_by_index(uint32_t requested_idx);
 
    uint32_t fifo_free(void);
    

@@ -486,6 +486,16 @@ void ss_client_if::process_device_info() {
             << std::endl;  
 }
 
+void ss_client_if::get_sampling_info( uint32_t& max_rate, uint32_t& decim_stages ) {
+   if( got_device_info ) {
+      max_rate = device_info.MaximumSampleRate;
+      decim_stages = device_info.DecimationStageCount;
+   } else {
+      max_rate = 0;
+      decim_stages = 0;
+   }
+}
+
 void ss_client_if::process_client_sync() {
   ClientSync sync;
   std::memcpy(&sync, body_buffer, sizeof(ClientSync));
@@ -496,6 +506,7 @@ void ss_client_if::process_client_sync() {
   channel_center_frequency = sync.IQCenterFrequency;
   _center_freq = (double) sync.IQCenterFrequency;
 
+/*
   std::cerr << "\n**********\nClient sync:"
             << "\n   Control:     " << (sync.CanControl == 1 ? "Yes" : "No")
             << "\n   gain:        " << sync.Gain
@@ -508,7 +519,7 @@ void ss_client_if::process_client_sync() {
             << "\n   min_fft_ctr: " << sync.MinimumFFTCenterFrequency            
             << "\n   max_fft_ctr: " << sync.MaximumFFTCenterFrequency            
             << std::endl;
-
+*/
 
   switch (streaming_mode) {
   case STREAM_MODE_FFT_ONLY:
@@ -656,41 +667,87 @@ void ss_client_if::set_stream_state() {
   set_setting(SETTING_STREAMING_ENABLED, {(unsigned int)(streaming ? 1 : 0)});
 }
 
+double ss_client_if::set_sample_rate_by_decim_stage(const uint32_t decim_stage) {
+
+   uint32_t requested_idx = 0xFFFFFFFF;
+   
+   if( decim_stage < device_info.DecimationStageCount ) {
+      for (unsigned int i=0; i<_sample_rates.size(); i++) {
+         if (_sample_rates[i].second == decim_stage) {
+            requested_idx = i;
+            break;
+         }
+      }
+   }
+   
+   if( requested_idx >= _sample_rates.size() ) {
+      std::cerr << "SS_client_if: Decimation stage not supported: " << decim_stage << std::endl;
+      std::cerr << "SS_client_if: Supported Sample Rates: " << std::endl;
+      for (std::pair<double, uint32_t> sr: _sample_rates) {
+         std::cerr << "SS_client_if:   " << sr.first << "\t\t" << sr.second << std::endl;
+      }
+      std::stringstream ss ("Unsupported decimation stage: ");
+      ss << decim_stage;
+      throw std::runtime_error( ss.str() );   
+   }
+
+   return set_sample_rate_by_index(requested_idx);
+
+}
+
+double ss_client_if::set_sample_rate_by_index(uint32_t requested_idx) {
+
+   if( requested_idx >= _sample_rates.size() ) {
+      // This should not happen as this is an internal method and we should
+      // have checked by now
+      std::cerr << "SS_client_if: Internal error; requested_idx " << requested_idx
+         << " out of bounds. Can only accept 0 to " << _sample_rates.size() - 1
+         << std::endl;
+      return 0.;   
+   }
+   
+   double sampleRate = _sample_rates[requested_idx].first;
+   
+   if( m_do_iq && requested_idx < _sample_rates.size() ) {
+         channel_decimation_stage_count = _sample_rates[requested_idx].second;
+         set_setting(SETTING_IQ_DECIMATION, {channel_decimation_stage_count});
+         m_iq_sample_rate = sampleRate;
+         std::cerr << "SS_client_if: Setting IQ sample rate to " << sampleRate
+            << " stage " << _sample_rates[requested_idx].second << std::endl;
+   } else if( !m_do_iq ) {
+         // For FFT-only, need full rate FFT but would like minimum rate IQ.
+         // However, spyserver does not appear to provide high-rate fft and
+         // low-rate IQ simultaneously. You must request as much IQ as you
+         // want FFT data. :-(
+         sampleRate = _sample_rates[_sample_rates.size() - 1].first;
+         // set_setting(SETTING_IQ_DECIMATION, {_sample_rates[min_idx].second} );
+         set_setting(SETTING_IQ_DECIMATION, {_sample_rates[requested_idx].second} );
+         m_iq_sample_rate = sampleRate;
+         std::cerr << "SS_client_if: Setting fft-only IQ sample rate to " << sampleRate << std::endl;
+   }
+
+   if( m_do_fft && requested_idx < _sample_rates.size() ) {
+         double fft_rate = _sample_rates[requested_idx].first;
+         set_setting(SETTING_FFT_DECIMATION, {_sample_rates[requested_idx].second} );
+         m_fft_sample_rate = fft_rate;
+         std::cerr << "SS_client_if: Setting FFT sample rate to " << fft_rate << std::endl;
+         set_setting(SETTING_FFT_DISPLAY_PIXELS, { m_fft_bins });
+   }
+
+   return get_sample_rate();
+
+}
+
 double ss_client_if::set_sample_rate(double sampleRate) {
 
    uint32_t requested_idx = 0xFFFFFFFF;
-
+   
    if (sampleRate <= 0xFFFFFFFF) {
       for (unsigned int i=0; i<_sample_rates.size(); i++) {
          if (_sample_rates[i].first == sampleRate) {
             requested_idx = i;
          }
       }
-
-      if( m_do_iq && requested_idx < _sample_rates.size() ) {
-            channel_decimation_stage_count = _sample_rates[requested_idx].second;
-            set_setting(SETTING_IQ_DECIMATION, {channel_decimation_stage_count});
-            m_iq_sample_rate = sampleRate;
-            std::cerr << "SS_client_if: Setting IQ sample rate to " << sampleRate << " stage " << channel_decimation_stage_count << std::endl;
-      } else if( !m_do_iq ) {
-            // For FFT-only, need full rate FFT but would like minimum rate IQ.
-            // However, spyserver does not appear to provide high-rate fft and
-            // low-rate IQ simultaneously. You must request as much IQ as you
-            // want FFT data. :-(
-            double iq_rate = _sample_rates[_sample_rates.size() - 1].first;
-//            set_setting(SETTING_IQ_DECIMATION, {_sample_rates[min_idx].second} );
-            set_setting(SETTING_IQ_DECIMATION, {_sample_rates[requested_idx].second} );
-            m_iq_sample_rate = iq_rate;
-            std::cerr << "SS_client_if: Setting fft-only IQ sample rate to " << iq_rate << std::endl;
-      }
-
-      if( m_do_fft && requested_idx < _sample_rates.size() ) {
-            double fft_rate = _sample_rates[requested_idx].first;
-            set_setting(SETTING_FFT_DECIMATION, {_sample_rates[requested_idx].second} );
-            m_fft_sample_rate = fft_rate;
-            std::cerr << "SS_client_if: Setting FFT sample rate to " << fft_rate << std::endl;
-      }
-
    }
    
    if( requested_idx >= _sample_rates.size() ) {
@@ -700,13 +757,12 @@ double ss_client_if::set_sample_rate(double sampleRate) {
          std::cerr << "SS_client_if:   " << sr.first << std::endl;
       }
       std::stringstream ss ("Unsupported samplerate: ");
-      ss << sampleRate/1e6;
+      ss << sampleRate;
       throw std::runtime_error( ss.str() );   
    }
 
-   set_setting(SETTING_FFT_DISPLAY_PIXELS, { m_fft_bins });
-   
-   return get_sample_rate();
+   return set_sample_rate_by_index(requested_idx);
+
 }
 
 double ss_client_if::set_center_freq(double centerFrequency, size_t chan) {
@@ -854,7 +910,7 @@ int ss_client_if::get_iq_data( const int batch_size,
    // move tail   
    m_fifo_tail = (m_fifo_tail + batch_bytes) % m_fifo_size;
 
-   return batch_size;
+   return (batch_bytes / sizeof(T)) / 2;
 }
 
 double ss_client_if::get_sample_rate()

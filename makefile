@@ -8,7 +8,7 @@ OBJ = ss_client.o tcp_client.o ss_client_if.o
 	$(CXX) -c -o $@ $< $(CXXFLAGS)
 
 ss_client: $(OBJ)
-	$(CXX) -o $@ $^ $(CXXFLAGS) -lpthread
+	$(CXX) -o $@ $^ $(CXXFLAGS) -lpthread -lsamplerate
 	
 clean:
 	rm -f *.o
