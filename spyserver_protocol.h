@@ -67,11 +67,11 @@ enum StreamType
 
 enum StreamingMode
 {
-  STREAM_MODE_IQ_ONLY       = STREAM_TYPE_IQ,
-  STREAM_MODE_AF_ONLY       = STREAM_TYPE_AF,
-  STREAM_MODE_FFT_ONLY      = STREAM_TYPE_FFT,
-  STREAM_MODE_FFT_IQ        = STREAM_TYPE_FFT | STREAM_TYPE_IQ,
-  STREAM_MODE_FFT_AF        = STREAM_TYPE_FFT | STREAM_TYPE_AF,
+  STREAM_MODE_IQ_ONLY       = STREAM_TYPE_IQ,                     // 0x01
+  STREAM_MODE_AF_ONLY       = STREAM_TYPE_AF,                     // 0x02
+  STREAM_MODE_FFT_ONLY      = STREAM_TYPE_FFT,                    // 0x04
+  STREAM_MODE_FFT_IQ        = STREAM_TYPE_FFT | STREAM_TYPE_IQ,   // 0x05
+  STREAM_MODE_FFT_AF        = STREAM_TYPE_FFT | STREAM_TYPE_AF,   // 0x06
 };
 
 enum StreamFormat

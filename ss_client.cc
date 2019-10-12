@@ -168,11 +168,7 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
       }
 	} // end arg flags
 
-   std::cerr << "optind now " << optind << "  argc: " << argc << std::endl;
-
    bool got_mode_string = false;	
-
-   std::cerr << "Checking argv0: " << argv[0] << std::endl;
 
    // check invocation context
    if( 0 != strstr(argv[0], "ss_power") ) {
@@ -182,7 +178,7 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
    	   settings.fft_outfilename = argv[optind];
    	   optind++;
    	}
-      std::cerr << "fft filename: " << settings.fft_outfilename << std::endl;
+
       got_mode_string = true;
    } else if( 0 != strstr(argv[0], "ss_iq") ) {
       // assume iq-only
@@ -221,8 +217,6 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
 	   exit(0);
    }   
 
-   std::cerr << "optind now " << optind << "  argc: " << argc << std::endl;
-   
 	if(optind == argc - 1) {
 	   // only one filename provided
 	   if( settings.do_iq == 1 ) {
@@ -263,7 +257,8 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
    if( settings.fft_bins > max ) {
       settings.fft_bins = max;
    }
-   std::cerr << "bits for bins: " << std::ceil(std::log2(bins_for_res)) << std::endl;
+
+//   std::cerr << "bits for bins: " << std::ceil(std::log2(bins_for_res)) << std::endl;
    std::cerr << "bins for res: " << bins_for_res << "   fft bins: " << settings.fft_bins << "   resolution: "
       << settings.sample_rate / settings.fft_bins << "Hz" << std::endl;
 }
@@ -295,13 +290,6 @@ void fft_work_thread( ss_client_if& server,
    double hz_low = settings.center_freq - (settings.sample_rate * bw_trim / 2.0) ;
    double hz_high = settings.center_freq + (settings.sample_rate * bw_trim / 2.0);
 
-   std::cerr << "fft_work_thread: center_freq: " << settings.center_freq
-             << "                 sample_rate: " << settings.sample_rate
-             << "                    fft_bins: " << settings.fft_bins
-             << "                      hz_low: " << hz_low
-             << "                     hz_high: " << hz_high
-             << std::endl;
-             
    double last_start = get_monotonic_seconds();
 
 //   std::cerr << "fft_work_thread starting\n";
@@ -385,7 +373,6 @@ int main(int argc, char* argv[]) {
       
    ss_client_if server (settings.server, settings.port, settings.do_iq, settings.do_fft, settings.fft_bins, settings.sample_bits);
 
-
    // Get sample rate info and decide which one to ask for; set up resampler if needed
    uint32_t max_samp_rate;
    uint32_t decim_stages;
@@ -393,20 +380,25 @@ int main(int argc, char* argv[]) {
    double resample_ratio = 1.0; //  output rate / input rate where output rate is requested rate and input rate is next highest available rate
    server.get_sampling_info(max_samp_rate, decim_stages);
    if( max_samp_rate > 0 ) {
-      // see if any of the available rates match the requested rate
-      for( unsigned int i = 0; i < decim_stages; ++i ) {
-         unsigned int cand_rate = (unsigned int)(max_samp_rate / (1 << i));
-         if( cand_rate == (unsigned int)(settings.output_rate) ) {
-            desired_decim_stage = i;
-            resample_ratio = settings.output_rate / (double)cand_rate;
-            std::cerr << "Exact decimation match\n";
-            break;
-         } else if( cand_rate > (unsigned int)(settings.output_rate) ) {
-            // remember the next-largest rate that is available
-            desired_decim_stage = i;
-            resample_ratio = settings.output_rate / (double)cand_rate;
-            settings.sample_rate = cand_rate;
+      if( settings.do_iq == 1 ) {
+         // see if any of the available rates match the requested rate
+         for( unsigned int i = 0; i < decim_stages; ++i ) {
+            unsigned int cand_rate = (unsigned int)(max_samp_rate / (1 << i));
+            if( cand_rate == (unsigned int)(settings.output_rate) ) {
+               desired_decim_stage = i;
+               resample_ratio = settings.output_rate / (double)cand_rate;
+               std::cerr << "Exact decimation match\n";
+               break;
+            } else if( cand_rate > (unsigned int)(settings.output_rate) ) {
+               // remember the next-largest rate that is available
+               desired_decim_stage = i;
+               resample_ratio = settings.output_rate / (double)cand_rate;
+               settings.sample_rate = cand_rate;
+            }
          }
+      } else if( settings.do_fft == 1 ) {
+         settings.output_rate = max_samp_rate;
+         desired_decim_stage = 0;
       }
       
       std::cerr << "Desired decimation stage: " << desired_decim_stage
@@ -414,10 +406,19 @@ int main(int argc, char* argv[]) {
          << " = " << max_samp_rate / (1 << desired_decim_stage) << ") resample ratio: "
          << resample_ratio << std::endl;
    }
-   
+
+   if(!server.set_sample_rate_by_decim_stage(10)) {
+      std::cerr << "Failed to set sample rate 10\n";
+      exit(1);
+   }
    std::cerr << "ss_client: setting center_freq to " << settings.center_freq << std::endl;
    if(!server.set_center_freq(settings.center_freq)) {
       std::cerr << "Failed to set freq\n";
+      exit(1);
+   }
+
+   if(!server.set_sample_rate_by_decim_stage(desired_decim_stage)) {
+      std::cerr << "Failed to set sample rate " << desired_decim_stage << "\n";
       exit(1);
    }
 
@@ -426,24 +427,8 @@ int main(int argc, char* argv[]) {
       exit(1);
    }
 
-   if(!server.set_gain(settings.dig_gain, "Digital")) {
-      std::cerr << "Failed to set digital gain\n";
-      exit(1);
-   }
- 
-   if(!server.set_sample_rate_by_decim_stage(desired_decim_stage)) {
-      std::cerr << "Failed to set sample rate\n";
-      exit(1);
-   }
-
-
-    // if the resample_ratio is not 1, we need a resampler.
-//   int16_t* out_short;
-//  float*   in_f
-//   float*   out_f;
-//   SRC_STATE  *src;
-//   SRC_DATA    data;
-   data.output_frames_gen = batch_sz;
+   // if the resample_ratio is not 1, we need a resampler.
+   data.output_frames_gen = batch_sz; // re-use for no-resampler case too
 
    if( resample_ratio != 1.0 ) {
       in_f = new float[batch_sz*2];

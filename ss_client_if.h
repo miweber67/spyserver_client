@@ -58,11 +58,14 @@ public:
    void get_fft_data( std::vector<uint32_t>& outdata, int& outperiods );
    void get_sampling_info( uint32_t& max_rate, uint32_t& decim_stages );
 
-   double set_sample_rate( double rate );
-   double set_sample_rate_by_decim_stage(const uint32_t decim_stage);
+   bool set_sample_rate( double rate );
+   bool set_sample_rate_by_decim_stage(const uint32_t decim_stage);
    double get_sample_rate( void );
 
-   double set_center_freq( double freq, size_t chan = 0 );
+   bool set_center_freq( double freq, size_t chan = 0 );
+   bool set_iq_center_freq( double freq, size_t chan = 0 );
+   bool set_fft_center_freq( double freq, size_t chan = 0 );
+   // which would this return? TODO: fix
    double get_center_freq( size_t chan = 0 );
 
    std::vector<std::string> get_gain_names( size_t chan = 0 );
@@ -84,10 +87,6 @@ private:
    const std::string NameRTLSDR = std::string("SpyServer - RTLSDR");
    const std::string NameUnknown = std::string("SpyServer - Unknown Device");
 
-   uint32_t minimum_tunable_frequency;
-   uint32_t maximum_tunable_frequency;
-   uint32_t device_center_frequency;
-   uint32_t channel_center_frequency;
    uint32_t channel_decimation_stage_count;
    tcp_client client;
 
@@ -111,7 +110,8 @@ private:
    void process_uint8_fft();
    void handle_new_message();
    void set_stream_state();
-   double set_sample_rate_by_index(uint32_t requested_idx);
+   bool set_sample_rate_by_index(uint32_t requested_idx);
+   void send_stream_format_commands();
 
    uint32_t fifo_free(void);
    
@@ -119,7 +119,6 @@ private:
    std::atomic_bool streaming;
    std::atomic_bool got_device_info;
    std::atomic_bool got_sync_info;
-   std::atomic_bool can_control;
    std::atomic_bool is_connected;
    std::thread *receiver_thread;
 
@@ -136,6 +135,7 @@ private:
    int port;
 
    DeviceInfo device_info;
+   ClientSync m_cur_client_sync;
    MessageHeader header;
 
    uint32_t streaming_mode;

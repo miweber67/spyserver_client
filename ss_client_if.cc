@@ -37,6 +37,7 @@ ss_client_if::ss_client_if (const std::string _ip,
    port(_port),
 
    streaming_mode(STREAM_MODE_IQ_ONLY),
+   _fifo(NULL),
    m_fifo_head(0),
    m_fifo_tail(0),
    m_fifo_size(10 * 1024 * 1024),
@@ -54,7 +55,6 @@ ss_client_if::ss_client_if (const std::string _ip,
 
    std::cerr << "SS_client_if(" << ip << ", " << port << ")" << std::endl;
    client = tcp_client(ip, port);
-
 
    streaming_mode = 0;
    if( m_do_iq ) {
@@ -74,6 +74,17 @@ ss_client_if::ss_client_if (const std::string _ip,
    }
    
 //   std::cerr << "Streaming mode is " << streaming_mode << std::endl;
+
+   // Connect sends "HELLO" command to server
+   // If connected also sends these commands in on_connect:
+   // Currently sends only commands if mode is active, i.e., fft / iq
+   // - streaming mode
+   // - fft display pixels
+   // - fft db offset
+   // - fft db range
+   // - iq digital gain
+   // - fft format
+   // - iq format
    connect();
 
    std::cerr << "SS_client_if: Ready" << std::endl;
@@ -159,28 +170,48 @@ void ss_client_if::disconnect()
 
 void ss_client_if::on_connect()
 {
+   // Reference command order is:
+   // - streaming mode
+   // - fft display pixels
+   // - fft db offset
+   // - fft db range
+   // - iq digital gain
+   // - fft format
+   // - iq format
+   // --- these will have to wait until freq is set ---
+   // - fft freq
+   // - iq freq
+   // - fft decim
+   // - iq decim
+
+   // It is unclear what should happen if a client wants only IQ or only FFT
+   // so as a first approximation we will try setting only the relevent settings
+   // to the mode(s) we are in.
+   
    set_setting(SETTING_STREAMING_MODE, { streaming_mode });
-   if( m_sample_bits == 16 ) {
-      set_setting(SETTING_IQ_FORMAT, { STREAM_FORMAT_INT16 });
-   } else {
-      set_setting(SETTING_IQ_FORMAT, { STREAM_FORMAT_UINT8 });
+   
+   if( m_do_fft ) {
+      set_setting(SETTING_FFT_DISPLAY_PIXELS, { m_fft_bins });
+      set_setting(SETTING_FFT_DB_OFFSET, { 0x00 });
+      set_setting(SETTING_FFT_DB_RANGE,  { 0x7f });
    }
-   set_setting(SETTING_FFT_FORMAT, { STREAM_FORMAT_UINT8 });
-   set_setting(SETTING_FFT_DISPLAY_PIXELS, { m_fft_bins });
-  //set_setting(SETTING_FFT_DB_OFFSET, { fftOffset });
-  //set_setting(SETTING_FFT_DB_RANGE, { fftRange });
-  //device_info.MaximumSampleRate
-  //availableSampleRates
-  std::cerr << "SS_client_if: Maximum Sample Rate: " << device_info.MaximumSampleRate << std::endl;
+   
+   set_setting(SETTING_IQ_DIGITAL_GAIN, {0xFFFFFFFF}); //  sdrsharp sets this value to 0xffffffff
+
+   send_stream_format_commands();
+
   for (unsigned int i = device_info.MinimumIQDecimation; i<=device_info.DecimationStageCount; i++) {
     uint32_t sr = device_info.MaximumSampleRate / (1 << i);
     _sample_rates.push_back( std::pair<double, uint32_t>((double)sr, i ) );
   }
+
   std::sort(_sample_rates.begin(), _sample_rates.end());
-  std::cerr << "SS_client_if: Supported Sample Rates: " << std::endl;
-  for (std::pair<double, uint32_t> sr: _sample_rates) {
-    std::cerr << "SS_client_if:   " << sr.first << "\t" << sr.second << std::endl;
-  }
+
+//  std::cerr << "SS_client_if: Supported Sample Rates: " << std::endl;
+//  for (std::pair<double, uint32_t> sr: _sample_rates) {
+//    std::cerr << "SS_client_if:   " << (unsigned int)sr.first << "\t\t" << sr.second << std::endl;
+//  }
+
 }
 
 bool ss_client_if::set_setting(uint32_t settingType, std::vector<uint32_t> params) {
@@ -226,13 +257,7 @@ void ss_client_if::cleanup() {
 
     _gain = 0;
     _digitalGain = 0;
-    //displayCenterFrequency = 0;
-    //device_center_frequency = 0;
-    //displayDecimationStageCount = 0;
-    //channel_decimation_stage_count = 0;
-    //minimum_tunable_frequency = 0;
-    //maximum_tunable_frequency = 0;
-    can_control = false;
+
     got_device_info = false;
     got_sync_info = false;
 
@@ -418,18 +443,18 @@ bool ss_client_if::send_command(uint32_t cmd, std::vector<uint8_t> args) {
   }
 
   try {
-    client.send_data((char *)buffer, headerLen+argLen);
-    result = true;
-//    std::cerr << "Sent command: " << cmd << " args: ";
+//    std::cerr << "Sending command: " << cmd << " args: ";
 //    print_vec(args);
 //    std::cerr << std::endl;
+    client.send_data((char *)buffer, headerLen+argLen);
+    result = true;
   } catch (std::exception &e) {
     std::cerr << "caught exception while sending command.\n";
     result = false;
   }
 
   delete[] buffer;
-   std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
   return result;
 }
 
@@ -466,8 +491,6 @@ void ss_client_if::handle_new_message() {
 
 void ss_client_if::process_device_info() {
   std::memcpy(&device_info, body_buffer, sizeof(DeviceInfo));
-  minimum_tunable_frequency = device_info.MinimumFrequency;
-  maximum_tunable_frequency = device_info.MaximumFrequency;
   got_device_info = true;
 
   std::cerr << "\n**********\nDevice Info:" 
@@ -497,42 +520,25 @@ void ss_client_if::get_sampling_info( uint32_t& max_rate, uint32_t& decim_stages
 }
 
 void ss_client_if::process_client_sync() {
-  ClientSync sync;
-  std::memcpy(&sync, body_buffer, sizeof(ClientSync));
 
-  can_control = sync.CanControl != 0;
-  _gain = (double) sync.Gain;
-  device_center_frequency = sync.DeviceCenterFrequency;
-  channel_center_frequency = sync.IQCenterFrequency;
-  _center_freq = (double) sync.IQCenterFrequency;
+  std::memcpy(&m_cur_client_sync, body_buffer, sizeof(ClientSync));
 
-/*
+  _gain = (double) m_cur_client_sync.Gain;
+  _center_freq = (double) m_cur_client_sync.IQCenterFrequency;
+
   std::cerr << "\n**********\nClient sync:"
-            << "\n   Control:     " << (sync.CanControl == 1 ? "Yes" : "No")
-            << "\n   gain:        " << sync.Gain
-            << "\n   dev_ctr:     " << device_center_frequency
-            << "\n   ch_ctr:      " << channel_center_frequency
-            << "\n   iq_ctr:      " << sync.IQCenterFrequency
-            << "\n   fft_ctr:     " << sync.FFTCenterFrequency            
-            << "\n   min_iq_ctr:  " << sync.MinimumIQCenterFrequency            
-            << "\n   max_iq_ctr:  " << sync.MaximumIQCenterFrequency            
-            << "\n   min_fft_ctr: " << sync.MinimumFFTCenterFrequency            
-            << "\n   max_fft_ctr: " << sync.MaximumFFTCenterFrequency            
+            << std::dec
+            << "\n   Control:     " << (m_cur_client_sync.CanControl == 1 ? "Yes" : "No")
+            << "\n   gain:        " << m_cur_client_sync.Gain
+            << "\n   dev_ctr:     " << m_cur_client_sync.DeviceCenterFrequency
+            << "\n   ch_ctr:      " << m_cur_client_sync.IQCenterFrequency
+            << "\n   iq_ctr:      " << m_cur_client_sync.IQCenterFrequency
+            << "\n   fft_ctr:     " << m_cur_client_sync.FFTCenterFrequency            
+            << "\n   min_iq_ctr:  " << m_cur_client_sync.MinimumIQCenterFrequency            
+            << "\n   max_iq_ctr:  " << m_cur_client_sync.MaximumIQCenterFrequency            
+            << "\n   min_fft_ctr: " << m_cur_client_sync.MinimumFFTCenterFrequency            
+            << "\n   max_fft_ctr: " << m_cur_client_sync.MaximumFFTCenterFrequency            
             << std::endl;
-*/
-
-  switch (streaming_mode) {
-  case STREAM_MODE_FFT_ONLY:
-  case STREAM_MODE_FFT_IQ:
-    minimum_tunable_frequency = sync.MinimumFFTCenterFrequency;
-    maximum_tunable_frequency = sync.MaximumFFTCenterFrequency;
-    break;
-  case STREAM_MODE_IQ_ONLY:
-    minimum_tunable_frequency = sync.MinimumIQCenterFrequency;
-    maximum_tunable_frequency = sync.MaximumIQCenterFrequency;
-//    std::cerr << "Stream IQ only\n";
-    break;
-  }
 
   got_sync_info = true;
 }
@@ -667,7 +673,7 @@ void ss_client_if::set_stream_state() {
   set_setting(SETTING_STREAMING_ENABLED, {(unsigned int)(streaming ? 1 : 0)});
 }
 
-double ss_client_if::set_sample_rate_by_decim_stage(const uint32_t decim_stage) {
+bool ss_client_if::set_sample_rate_by_decim_stage(const uint32_t decim_stage) {
 
    uint32_t requested_idx = 0xFFFFFFFF;
    
@@ -695,7 +701,7 @@ double ss_client_if::set_sample_rate_by_decim_stage(const uint32_t decim_stage) 
 
 }
 
-double ss_client_if::set_sample_rate_by_index(uint32_t requested_idx) {
+bool ss_client_if::set_sample_rate_by_index(uint32_t requested_idx) {
 
    if( requested_idx >= _sample_rates.size() ) {
       // This should not happen as this is an internal method and we should
@@ -703,18 +709,30 @@ double ss_client_if::set_sample_rate_by_index(uint32_t requested_idx) {
       std::cerr << "SS_client_if: Internal error; requested_idx " << requested_idx
          << " out of bounds. Can only accept 0 to " << _sample_rates.size() - 1
          << std::endl;
-      return 0.;   
+      return false;   
    }
    
    double sampleRate = _sample_rates[requested_idx].first;
    
-   if( m_do_iq && requested_idx < _sample_rates.size() ) {
+   if( m_do_fft ) {
+         m_fft_sample_rate = sampleRate;
+         set_setting(SETTING_FFT_DECIMATION, {_sample_rates[requested_idx].second} );
+//         std::cerr << "SS_client_if: Setting FFT sample rate to " << (unsigned int)m_fft_sample_rate << std::endl;
+   }
+
+   if( m_do_iq ) {
+//         std::cerr << "SS_client_if: Setting IQ sample rate to " << sampleRate
+//            << " stage " << _sample_rates[requested_idx].second << std::endl;
          channel_decimation_stage_count = _sample_rates[requested_idx].second;
          set_setting(SETTING_IQ_DECIMATION, {channel_decimation_stage_count});
-         m_iq_sample_rate = sampleRate;
-         std::cerr << "SS_client_if: Setting IQ sample rate to " << sampleRate
-            << " stage " << _sample_rates[requested_idx].second << std::endl;
+         
+         // sdr# 'appears' to set the IQ format each time it sets the decimation
+         // so we will try to do the same here.
+         send_stream_format_commands();
+
    } else if( !m_do_iq ) {
+         // I am not sure I still believe this, so disabling for now.
+/*
          // For FFT-only, need full rate FFT but would like minimum rate IQ.
          // However, spyserver does not appear to provide high-rate fft and
          // low-rate IQ simultaneously. You must request as much IQ as you
@@ -724,21 +742,13 @@ double ss_client_if::set_sample_rate_by_index(uint32_t requested_idx) {
          set_setting(SETTING_IQ_DECIMATION, {_sample_rates[requested_idx].second} );
          m_iq_sample_rate = sampleRate;
          std::cerr << "SS_client_if: Setting fft-only IQ sample rate to " << sampleRate << std::endl;
+*/
    }
 
-   if( m_do_fft && requested_idx < _sample_rates.size() ) {
-         double fft_rate = _sample_rates[requested_idx].first;
-         set_setting(SETTING_FFT_DECIMATION, {_sample_rates[requested_idx].second} );
-         m_fft_sample_rate = fft_rate;
-         std::cerr << "SS_client_if: Setting FFT sample rate to " << fft_rate << std::endl;
-         set_setting(SETTING_FFT_DISPLAY_PIXELS, { m_fft_bins });
-   }
-
-   return get_sample_rate();
-
+   return true;
 }
 
-double ss_client_if::set_sample_rate(double sampleRate) {
+bool ss_client_if::set_sample_rate(double sampleRate) {
 
    uint32_t requested_idx = 0xFFFFFFFF;
    
@@ -765,27 +775,90 @@ double ss_client_if::set_sample_rate(double sampleRate) {
 
 }
 
-double ss_client_if::set_center_freq(double centerFrequency, size_t chan) {
+bool ss_client_if::set_center_freq(double centerFrequency, size_t chan) {
+   // Order of operations for sdr sharp:
+   // - fft freq
+   // - iq freq
+   // -- these will happen later --
+   // - fft decim
+   // - iq decim
+   bool ret1 = true;
+   bool ret2 = true;
+   
+   if( m_do_fft == 1 ) {
+      ret1 = set_fft_center_freq( centerFrequency, chan );
+      ret2 = set_iq_center_freq( centerFrequency, chan );
+   }
+   if( m_do_iq == 1 ) {
+      ret2 = set_iq_center_freq( centerFrequency, chan );
+   }
+   return ret1 && ret2;
+}
 
-   if (centerFrequency <= 0xFFFFFFFF) {
-      channel_center_frequency = (uint32_t) centerFrequency;
-      
-      std::vector<uint32_t> param(1);
-      param[0] = channel_center_frequency;
+bool ss_client_if::set_iq_center_freq(double centerFrequency, size_t chan) {
 
-      set_setting(SETTING_STREAMING_MODE, { STREAM_MODE_FFT_IQ });
-      set_setting(SETTING_IQ_FREQUENCY, param);
-      set_setting(SETTING_FFT_FREQUENCY, param);
-      set_setting(SETTING_STREAMING_MODE, { streaming_mode });
-    
-      _center_freq = centerFrequency;
-    
-      return centerFrequency;
-  }
+   if( centerFrequency < device_info.MinimumFrequency || 
+       centerFrequency > device_info.MaximumFrequency) {
+      std::cerr << "SS_client_if: Requested center IQ freq " << (centerFrequency/1e6)
+         << " outside device supported range: " << (unsigned int)device_info.MinimumFrequency
+         << " - " << (unsigned int)device_info.MaximumFrequency << std::endl;
+      return m_cur_client_sync.DeviceCenterFrequency;
+   }
 
-  std::cerr << "Unsupported center frequency: " << (centerFrequency/1e6) << std::endl;
+   // If we don't have control, requested center must be within bounds
+   if( m_cur_client_sync.CanControl == 0 ) {
+      if( (centerFrequency < m_cur_client_sync.MinimumIQCenterFrequency || 
+           centerFrequency > m_cur_client_sync.MaximumIQCenterFrequency) ) {
+         std::cerr << "SS_client_if: Requested center IQ freq " << (centerFrequency/1e6)
+            << " outside currently allowed range: " << m_cur_client_sync.MinimumIQCenterFrequency 
+            << " - " << m_cur_client_sync.MaximumIQCenterFrequency << std::endl;
+         return m_cur_client_sync.IQCenterFrequency;
+      }
+   }
 
-  return this->get_center_freq(chan);
+   // If we do have control or the request is in bounds, OK to set
+   std::vector<uint32_t> param(1);
+   param[0] = centerFrequency;
+//   std::cerr << "SS_client_if: Setting SETTING_IQ_FREQUENCY" << std::endl;
+   set_setting(SETTING_IQ_FREQUENCY, param);
+   // get updated client sync block
+   send_stream_format_commands();
+   
+   // can't know if this actually succeeded until updated client sync block arrives
+   return true;
+}
+
+bool ss_client_if::set_fft_center_freq(double centerFrequency, size_t chan) {
+
+   if( centerFrequency < device_info.MinimumFrequency || 
+       centerFrequency > device_info.MaximumFrequency) {
+      std::cerr << "SS_client_if: Requested center FFT freq " << (centerFrequency/1e6)
+         << " outside device supported range: " << (unsigned int)device_info.MinimumFrequency
+         << " - " << (unsigned int)device_info.MaximumFrequency << std::endl;
+      return false;
+   }
+
+   // If we don't have control, requested center must be within bounds
+   if( m_cur_client_sync.CanControl == 0 ) {
+      if( (centerFrequency < m_cur_client_sync.MinimumFFTCenterFrequency || 
+           centerFrequency > m_cur_client_sync.MaximumFFTCenterFrequency) ) {
+         std::cerr << "SS_client_if: Requested center FFT freq " << (centerFrequency/1e6)
+            << " outside currently allowed range: " << m_cur_client_sync.MinimumFFTCenterFrequency 
+            << " - " << m_cur_client_sync.MaximumFFTCenterFrequency << std::endl;
+         return false;
+      }
+   }
+
+   // If we do have control or the request is in bounds, OK to set
+   std::vector<uint32_t> param(1);
+   param[0] = centerFrequency;
+//   std::cerr << "SS_client_if: Setting SETTING_FFT_FREQUENCY" << std::endl;
+   set_setting(SETTING_FFT_FREQUENCY, param);
+   // get updated client sync block
+   send_stream_format_commands();
+
+   // can't know if this actually succeeded until updated client sync block arrives
+   return true;
 }
 
 void ss_client_if::process_uint8_fft() {
@@ -915,7 +988,9 @@ int ss_client_if::get_iq_data( const int batch_size,
 
 double ss_client_if::get_sample_rate()
 {
-  return m_iq_sample_rate;
+   if( m_do_iq ) return m_iq_sample_rate;
+   if( m_do_fft ) return m_fft_sample_rate;
+   return 0;
 }
 
 double ss_client_if::get_center_freq( size_t chan )
@@ -927,7 +1002,7 @@ std::vector<std::string> ss_client_if::get_gain_names( size_t chan )
 {
   std::vector< std::string > names;
 
-  if (can_control) {
+  if (m_cur_client_sync.CanControl) {
     names.push_back("LNA");
   }
   names.push_back("Digital");
@@ -947,11 +1022,11 @@ bool ss_client_if::get_gain_mode( size_t chan )
 
 double ss_client_if::set_gain( double gain, size_t chan )
 {
-  if (can_control) {
+  if (m_cur_client_sync.CanControl) {
     _gain = gain;
     set_setting(SETTING_GAIN, {(uint32_t)gain});
   } else {
-    std::cerr << "Spyserver: The server does not allow you to change the gains." << std::endl;
+    std::cerr << "SS_client_if: The server does not allow you to change the gains." << std::endl;
   }
 
   return _gain;
@@ -961,8 +1036,9 @@ double ss_client_if::set_gain( double gain, const std::string & name, size_t cha
 {
   if (name == "Digital") {
     _digitalGain = gain;
+    std::cerr << "SS_client_if: Setting digital gain not currently supported." << std::endl;
 //    set_setting(SETTING_IQ_DIGITAL_GAIN, {((uint32_t)gain) * 0xFFFFFFFF});
-    set_setting(SETTING_IQ_DIGITAL_GAIN, {(unsigned int)gain * 0xFFFFFFFF});
+//    set_setting(SETTING_IQ_DIGITAL_GAIN, {(unsigned int)gain * 0xFFFFFFFF});
     return _gain;
   }
 
@@ -981,6 +1057,23 @@ double ss_client_if::get_gain( const std::string & name, size_t chan )
 
   return get_gain(chan);
 }
+
+void ss_client_if::send_stream_format_commands() {
+   if( m_do_fft ) {
+//      std::cerr << "SS_client_if: Sending fft format command" << std::endl;
+      set_setting(SETTING_FFT_FORMAT, { STREAM_FORMAT_UINT8 });
+   }
+//   if( m_do_iq ) {
+   if( 1 ) {
+//      std::cerr << "SS_client_if: Sending iq format command" << std::endl;
+      if( m_sample_bits == 16 ) {
+         set_setting(SETTING_IQ_FORMAT, { STREAM_FORMAT_INT16 });
+      } else {
+         set_setting(SETTING_IQ_FORMAT, { STREAM_FORMAT_UINT8 });
+      }
+   }
+}
+
 
 template int ss_client_if::get_iq_data<int16_t>(const int batch_size, int16_t* out_array);
 template int ss_client_if::get_iq_data<uint8_t>(const int batch_size, uint8_t* out_array);
