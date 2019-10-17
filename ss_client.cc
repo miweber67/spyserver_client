@@ -12,6 +12,7 @@
 typedef struct settings {
    double center_freq;
    double sample_rate;
+   double fft_sample_rate;
    double gain;
    double dig_gain;
    uint32_t fft_bins;
@@ -79,6 +80,7 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
 
    settings.center_freq = 403000000;
    settings.sample_rate = 10000000;
+   settings.fft_sample_rate = 10000000;
    settings.gain = 20;
    settings.dig_gain = 0;
    settings.server = strdup("127.0.0.1");
@@ -287,8 +289,8 @@ void fft_work_thread( ss_client_if& server,
    int sum_periods = 0;
    // spyserver trims edges of fft; you don't get the whole thing. Exact percentage tbd
    const double bw_trim = 0.80;
-   double hz_low = settings.center_freq - (settings.sample_rate * bw_trim / 2.0) ;
-   double hz_high = settings.center_freq + (settings.sample_rate * bw_trim / 2.0);
+   double hz_low = settings.center_freq - (settings.fft_sample_rate * bw_trim / 2.0) ;
+   double hz_high = settings.center_freq + (settings.fft_sample_rate * bw_trim / 2.0);
 
    double last_start = get_monotonic_seconds();
 
@@ -300,7 +302,7 @@ void fft_work_thread( ss_client_if& server,
       
 //      std::cerr << "fft_work_thread got some data with " << periods << " periods\n";
 
-      double hz_step = settings.sample_rate * bw_trim / fft_data.size();
+      double hz_step = settings.fft_sample_rate * bw_trim / fft_data.size();
       // TODO: Configure fft bins in source interface and these sizes up front
       if( fft_data_sums.size() < fft_data.size() ) {
          fft_data_sums.resize(fft_data.size());
@@ -380,6 +382,7 @@ int main(int argc, char* argv[]) {
    double resample_ratio = 1.0; //  output rate / input rate where output rate is requested rate and input rate is next highest available rate
    server.get_sampling_info(max_samp_rate, decim_stages);
    if( max_samp_rate > 0 ) {
+      settings.fft_sample_rate = max_samp_rate;
       if( settings.do_iq == 1 ) {
          // see if any of the available rates match the requested rate
          for( unsigned int i = 0; i < decim_stages; ++i ) {
@@ -407,10 +410,10 @@ int main(int argc, char* argv[]) {
          << resample_ratio << std::endl;
    }
 
-   if(!server.set_sample_rate_by_decim_stage(10)) {
-      std::cerr << "Failed to set sample rate 10\n";
-      exit(1);
-   }
+//   if(!server.set_sample_rate_by_decim_stage(10)) {
+//      std::cerr << "Failed to set sample rate 10\n";
+//      exit(1);
+//   }
    std::cerr << "ss_client: setting center_freq to " << settings.center_freq << std::endl;
    if(!server.set_center_freq(settings.center_freq)) {
       std::cerr << "Failed to set freq\n";

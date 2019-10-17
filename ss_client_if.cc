@@ -196,7 +196,8 @@ void ss_client_if::on_connect()
       set_setting(SETTING_FFT_DB_RANGE,  { 0x7f });
    }
    
-   set_setting(SETTING_IQ_DIGITAL_GAIN, {0xFFFFFFFF}); //  sdrsharp sets this value to 0xffffffff
+   // set_setting(SETTING_IQ_DIGITAL_GAIN, {0xFFFFFFFF}); //  sdrsharp sets this value to 0xffffffff
+   set_setting(SETTING_IQ_DIGITAL_GAIN, {0x0});
 
    send_stream_format_commands();
 
