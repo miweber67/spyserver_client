@@ -410,10 +410,11 @@ int main(int argc, char* argv[]) {
          << resample_ratio << std::endl;
    }
 
-//   if(!server.set_sample_rate_by_decim_stage(10)) {
-//      std::cerr << "Failed to set sample rate 10\n";
-//      exit(1);
-//   }
+   if(!server.set_sample_rate_by_decim_stage(5)) {
+      std::cerr << "Failed to set sample rate 10\n";
+      exit(1);
+   }
+
    std::cerr << "ss_client: setting center_freq to " << settings.center_freq << std::endl;
    if(!server.set_center_freq(settings.center_freq)) {
       std::cerr << "Failed to set freq\n";
