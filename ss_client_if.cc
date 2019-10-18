@@ -289,6 +289,10 @@ void ss_client_if::thread_loop() {
         availableData = availableData > BufferSize ? BufferSize : availableData;
         client.receive_data(buffer, availableData);
         parse_message(buffer, availableData);
+      } else if( m_do_iq ){
+         std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      } else if( m_do_fft ) {
+         std::this_thread::sleep_for(std::chrono::milliseconds(100));
       }
     }
   } catch (std::exception &e) {
@@ -889,7 +893,7 @@ void ss_client_if::get_fft_data( std::vector<uint32_t>& outdata, int& outperiods
    while( 0 == m_fft_count ) {
       m_fft_avail.wait(lock);
    }
-   
+
    outdata = m_fft_bin_sums;
    outperiods = m_fft_count;
    
@@ -957,8 +961,8 @@ int ss_client_if::get_iq_data( const int batch_size,
    // don't peg the cpu checking, but don't wait too long beteween checks.
    // max_wait is how long it should take to receive a complete batch.
    unsigned int max_wait = (((double)batch_size / m_iq_sample_rate) * 1000) / 3;
-   std::cerr << "batch size: " << batch_size << "   iq_samp_rate: " << m_iq_sample_rate << std::endl;
-   std::cerr << "max_wait for iq data check is " << max_wait << "ms\n";
+//   std::cerr << "batch size: " << batch_size << "   iq_samp_rate: " << m_iq_sample_rate << std::endl;
+//   std::cerr << "max_wait for iq data check is " << max_wait << "ms\n";
    while (samps_avail < batch_size ) {
 //      std::cerr << "   Waiting with " << samps_avail << " samples available, want " << batch_size << std::endl;
       _samp_avail.wait(lock);
