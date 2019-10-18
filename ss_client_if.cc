@@ -714,6 +714,7 @@ bool ss_client_if::set_sample_rate_by_index(uint32_t requested_idx) {
    }
    
    double sampleRate = _sample_rates[requested_idx].first;
+   m_iq_sample_rate = sampleRate;
    
    if( m_do_fft ) {
          m_fft_sample_rate = sampleRate;
@@ -952,11 +953,17 @@ int ss_client_if::get_iq_data( const int batch_size,
    // this doesn't work if size > int32_t max
    // each sample counts as I + Q, so two values, each sizeof(T) bytes long
    int32_t samps_avail = ((m_fifo_size - fifo_free()) / 2) / sizeof(T);
-      
+   
+   // don't peg the cpu checking, but don't wait too long beteween checks.
+   // max_wait is how long it should take to receive a complete batch.
+   unsigned int max_wait = (((double)batch_size / m_iq_sample_rate) * 1000) / 3;
+   std::cerr << "batch size: " << batch_size << "   iq_samp_rate: " << m_iq_sample_rate << std::endl;
+   std::cerr << "max_wait for iq data check is " << max_wait << "ms\n";
    while (samps_avail < batch_size ) {
 //      std::cerr << "   Waiting with " << samps_avail << " samples available, want " << batch_size << std::endl;
       _samp_avail.wait(lock);
       samps_avail = ((m_fifo_size - fifo_free()) / 2) / sizeof(T);
+      std::this_thread::sleep_for(std::chrono::milliseconds(max_wait));
    }
 
 //   std::cerr << "   Releasing with " << samps_avail << " samples available, want " << batch_size << std::endl;
