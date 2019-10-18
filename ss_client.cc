@@ -27,10 +27,21 @@ typedef struct settings {
    uint8_t oneshot;
    uint8_t sample_bits;
    uint32_t output_rate;
+   uint32_t resample_quality;
    
 } SettingsT;
 
 
+/*
+enum
+      {    
+          SRC_SINC_BEST_QUALITY       = 0,
+          SRC_SINC_MEDIUM_QUALITY     = 1,
+          SRC_SINC_FASTEST            = 2,
+          SRC_ZERO_ORDER_HOLD         = 3,
+          SRC_LINEAR                  = 4
+      } ;
+*/
 void usage(char* appname) {
    
    static bool printed = false;
@@ -45,6 +56,7 @@ void usage(char* appname) {
                 << "\n  [-e <fft resolution> default 100Hz target]"
                 << "\n  [-g <gain>]"
                 << "\n  [-i  <integration interval for fft data> (default: 10 seconds)]"
+                << "\n  [-l <resample quality, 0-4, 0=best, 2=fastest (default), 3=samp_hold, 4=linear>]"
                 << "\n  [-r <server>]"
                 << "\n  [-q <port>]"
                 << "\n  [-n <num_samples>]"
@@ -95,6 +107,7 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
    settings.oneshot = 0;
    settings.sample_bits = 16;
    settings.output_rate = 48000;
+   settings.resample_quality = 2;
    
    int opt;
    double fft_resolution = 100;
@@ -137,6 +150,9 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
 	      break;
       case 'j': // digital gain
          settings.dig_gain = strtod(optarg, NULL);
+         break;
+      case 'l': // digital gain
+         settings.resample_quality = atoi(optarg);
          break;
       case 'M': // # ignore
          std::cerr << "-M not currently supported; ignoring\n";
@@ -434,6 +450,8 @@ int main(int argc, char* argv[]) {
    // if the resample_ratio is not 1, we need a resampler.
    data.output_frames_gen = batch_sz; // re-use for no-resampler case too
 
+   int error;
+
    if( resample_ratio != 1.0 ) {
       in_f = new float[batch_sz*2];
       out_f = new float[batch_sz*2];
@@ -443,15 +461,12 @@ int main(int argc, char* argv[]) {
       data.end_of_input = 0;
       data.output_frames = batch_sz;
       data.src_ratio = resample_ratio;
-      int error;
-      resampler = src_new(SRC_SINC_BEST_QUALITY, 2, &error);
+      resampler = src_new(settings.resample_quality, 2, &error);
       if( NULL == resampler ) {
          std::cerr << "Resampler error: " << src_strerror(error) << std::endl;
          exit(1);
       }
    }
-
-   int         error;
 
    server.start();
 
