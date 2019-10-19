@@ -307,28 +307,16 @@ void fft_work_thread( ss_client_if& server,
    int periods = 0;
    std::vector<uint32_t> fft_data_sums;
    int sum_periods = 0;
+
    // spyserver trims edges of fft; you don't get the whole thing. Exact percentage tbd
    const double bw_trim = 0.80;
-   double fft_hz_low = settings.center_freq - (settings.fft_sample_rate * bw_trim / 2.0) ;
-   double fft_hz_high = settings.center_freq + (settings.fft_sample_rate * bw_trim / 2.0);
 
-   double hz_low = fft_hz_low;
-   double hz_high = fft_hz_high;
-   
-   if( hz_low < settings.low_freq ) {
-      hz_low = settings.low_freq;
-   }
-   if( hz_high > settings.high_freq ) {
-      hz_high = settings.high_freq;
-   }
-   
    double last_start = get_monotonic_seconds();
 
     while( running ) {
    
       server.get_fft_data( fft_data, periods );
       
-      double hz_step = settings.fft_sample_rate * bw_trim / fft_data.size();
       // TODO: Configure fft bins in source interface and these sizes up front
       if( fft_data_sums.size() < fft_data.size() ) {
          fft_data_sums.resize(fft_data.size());
@@ -347,13 +335,33 @@ void fft_work_thread( ss_client_if& server,
       double now = get_monotonic_seconds();
       
       if( now - last_start > settings.fft_average_seconds ) {
+         double hz_step = settings.fft_sample_rate * bw_trim / fft_data.size();
+         double fft_hz_low = settings.center_freq - (settings.fft_sample_rate * bw_trim / 2.0) ;
+         double fft_hz_high = settings.center_freq + (settings.fft_sample_rate * bw_trim / 2.0);
+         double hz_low = fft_hz_low;
+         double hz_high = fft_hz_high;
+         
+         std::cerr << "settings.low_freq: " << settings.low_freq << std::endl;
+         std::cerr << "settings.high_freq: " << settings.high_freq << std::endl;
+         
+         if( hz_low < settings.low_freq ) {
+            unsigned int lowsteps = std::ceil((settings.low_freq - fft_hz_low) / hz_step);
+            hz_low = fft_hz_low + (hz_step * lowsteps);
+            std::cerr << "lowsteps: " << lowsteps << "\n";
+         }
+         if( hz_high > settings.high_freq ) {
+            unsigned int highsteps = std::ceil((settings.high_freq - fft_hz_low) / hz_step);
+            hz_high = fft_hz_low + (hz_step * highsteps);
+            std::cerr << "highsteps: " << highsteps << "\n";
+         }
+
          // dump to output file
          // create rtl_power-like header
          // # date, time, Hz low, Hz high, Hz step, samples, dB, dB, dB, ...
          // need only hz low and hz step
          std::ofstream outfile (settings.fft_outfilename);
-         outfile << "date, time, " << hz_low << ", "
-                 << hz_high << ", "
+         outfile << "date, time, " << (unsigned int)hz_low << ", "
+                 << (unsigned int)hz_high << ", "
                  << hz_step << ", "
                  << "1";
 
