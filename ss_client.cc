@@ -340,10 +340,7 @@ void fft_work_thread( ss_client_if& server,
          double fft_hz_high = settings.center_freq + (settings.fft_sample_rate * bw_trim / 2.0);
          double hz_low = fft_hz_low;
          double hz_high = fft_hz_high;
-         
-         std::cerr << "settings.low_freq: " << settings.low_freq << std::endl;
-         std::cerr << "settings.high_freq: " << settings.high_freq << std::endl;
-         
+
          if( hz_low < settings.low_freq ) {
             unsigned int lowsteps = std::ceil((settings.low_freq - fft_hz_low) / hz_step);
             hz_low = fft_hz_low + (hz_step * lowsteps);
