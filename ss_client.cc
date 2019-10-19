@@ -355,7 +355,7 @@ void fft_work_thread( ss_client_if& server,
          outfile << "date, time, " << hz_low << ", "
                  << hz_high << ", "
                  << hz_step << ", "
-                 << "1" << ", ";
+                 << "1";
 
          size_t num_pts = fft_data_sums.size();
          std::cerr << "processing " << num_pts << " points\n";
@@ -364,10 +364,7 @@ void fft_work_thread( ss_client_if& server,
          {
             double cur_hz = fft_hz_low + (hz_step * i);
             if( cur_hz >= hz_low && cur_hz <= hz_high ) {
-               outfile << (fft_data_sums[i] / sum_periods);
-               if( i < num_pts - 1 ) {
-                  outfile << ", ";
-               }
+               outfile << ", " << (fft_data_sums[i] / sum_periods);
             } else {
                // nop
             }
