@@ -10,6 +10,8 @@
 #include "ss_client_if.h"
 
 typedef struct settings {
+   double low_freq;
+   double high_freq;
    double center_freq;
    double sample_rate;
    double fft_sample_rate;
@@ -80,6 +82,8 @@ void parse_freq_arg(SettingsT& settings, double& fft_res, char* arg) {
       char c;
       ss >> low >> c >> high >> c >> res;
       settings.center_freq = (low + high) / 2;
+      settings.low_freq = low;
+      settings.high_freq = high;
       fft_res = res;
    } else {
       settings.center_freq = strtod(arg, NULL);
@@ -305,19 +309,25 @@ void fft_work_thread( ss_client_if& server,
    int sum_periods = 0;
    // spyserver trims edges of fft; you don't get the whole thing. Exact percentage tbd
    const double bw_trim = 0.80;
-   double hz_low = settings.center_freq - (settings.fft_sample_rate * bw_trim / 2.0) ;
-   double hz_high = settings.center_freq + (settings.fft_sample_rate * bw_trim / 2.0);
+   double fft_hz_low = settings.center_freq - (settings.fft_sample_rate * bw_trim / 2.0) ;
+   double fft_hz_high = settings.center_freq + (settings.fft_sample_rate * bw_trim / 2.0);
 
+   double hz_low = fft_hz_low;
+   double hz_high = fft_hz_high;
+   
+   if( hz_low < settings.low_freq ) {
+      hz_low = settings.low_freq;
+   }
+   if( hz_high > settings.high_freq ) {
+      hz_high = settings.high_freq;
+   }
+   
    double last_start = get_monotonic_seconds();
 
-//   std::cerr << "fft_work_thread starting\n";
-   
-   while( running ) {
+    while( running ) {
    
       server.get_fft_data( fft_data, periods );
       
-//      std::cerr << "fft_work_thread got some data with " << periods << " periods\n";
-
       double hz_step = settings.fft_sample_rate * bw_trim / fft_data.size();
       // TODO: Configure fft bins in source interface and these sizes up front
       if( fft_data_sums.size() < fft_data.size() ) {
@@ -346,13 +356,20 @@ void fft_work_thread( ss_client_if& server,
                  << hz_high << ", "
                  << hz_step << ", "
                  << "1" << ", ";
-                 
+
          size_t num_pts = fft_data_sums.size();
+         std::cerr << "processing " << num_pts << " points\n";
+         
          for (size_t i = 0; i < num_pts; ++i)
          {
-            outfile << (fft_data_sums[i] / sum_periods);
-            if( i < num_pts - 1 ) {
-               outfile << ", ";
+            double cur_hz = fft_hz_low + (hz_step * i);
+            if( cur_hz >= hz_low && cur_hz <= hz_high ) {
+               outfile << (fft_data_sums[i] / sum_periods);
+               if( i < num_pts - 1 ) {
+                  outfile << ", ";
+               }
+            } else {
+               // nop
             }
             fft_data_sums[i] = 0;
          }
