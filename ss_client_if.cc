@@ -514,6 +514,10 @@ void ss_client_if::process_device_info() {
             << std::endl;  
 }
 
+uint32_t ss_client_if::get_bandwidth() {
+   return device_info.MaximumBandwidth;
+}
+
 void ss_client_if::get_sampling_info( uint32_t& max_rate, uint32_t& decim_stages ) {
    if( got_device_info ) {
       max_rate = device_info.MaximumSampleRate;

@@ -308,9 +308,7 @@ void fft_work_thread( ss_client_if& server,
    std::vector<uint32_t> fft_data_sums;
    int sum_periods = 0;
 
-   // spyserver trims edges of fft; you don't get the whole thing. Exact percentage tbd
-   const double bw_trim = 0.80;
-
+   uint32_t bandwidth = server.get_bandwidth();
    double last_start = get_monotonic_seconds();
 
     while( running ) {
@@ -335,9 +333,9 @@ void fft_work_thread( ss_client_if& server,
       double now = get_monotonic_seconds();
       
       if( now - last_start > settings.fft_average_seconds ) {
-         double hz_step = settings.fft_sample_rate * bw_trim / fft_data.size();
-         double fft_hz_low = settings.center_freq - (settings.fft_sample_rate * bw_trim / 2.0) ;
-         double fft_hz_high = settings.center_freq + (settings.fft_sample_rate * bw_trim / 2.0);
+         double hz_step = bandwidth / fft_data.size();
+         double fft_hz_low = settings.center_freq - (bandwidth / 2.0);
+         double fft_hz_high = settings.center_freq + (bandwidth / 2.0);
          double hz_low = fft_hz_low;
          double hz_high = fft_hz_high;
 
@@ -363,7 +361,8 @@ void fft_work_thread( ss_client_if& server,
                  << "1";
 
          size_t num_pts = fft_data_sums.size();
-         std::cerr << "processing " << num_pts << " points\n";
+         std::cerr << "processing " << num_pts << " points from " << fft_hz_low
+                   << " to " << fft_hz_high;
          
          for (size_t i = 0; i < num_pts; ++i)
          {

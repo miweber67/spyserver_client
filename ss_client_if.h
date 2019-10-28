@@ -65,6 +65,8 @@ public:
    bool set_center_freq( double freq, size_t chan = 0 );
    bool set_iq_center_freq( double freq, size_t chan = 0 );
    bool set_fft_center_freq( double freq, size_t chan = 0 );
+   // return the bandwidth used for fft range
+   uint32_t get_bandwidth();
    // which would this return? TODO: fix
    double get_center_freq( size_t chan = 0 );
 
