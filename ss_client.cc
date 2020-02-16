@@ -520,7 +520,7 @@ int main(int argc, char* argv[]) {
 //            std::cerr << "Asked for " << available << " got " << samps << " samples from server" << std::endl;
             if( resampler != NULL ) {
 //               std::cerr << "converting buffer to floats\n";
-               src_short_to_float_array ((int16_t*)buf, data.data_in, samps*2);
+               src_short_to_float_array ((int16_t*)buf, in_f, samps*2);
                data.input_frames = samps;
                error = src_process(resampler, &data);
                if( 0 != error ) {
