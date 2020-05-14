@@ -30,6 +30,7 @@ typedef struct settings {
    uint8_t sample_bits;
    uint32_t output_rate;
    uint32_t resample_quality;
+   uint32_t batch_size;
    
 } SettingsT;
 
@@ -53,6 +54,7 @@ void usage(char* appname) {
                 << "\n  mode: one of  iq | fft | both"
                 << "\n  -f <center frequency>"
                 << "\n  -s <sample_rate>"
+                << "\n  [-a <data batch size, default 32768, shorter dumps collected data more often>]"
 //                << "\n  [-b <bits>, '8' or '16', default 16; 8 is EXPERIMENTAL]"
                 << "\n  [-j <digital gain> - experimental, 0.0 .. 1.0]"
                 << "\n  [-e <fft resolution> default 100Hz target]"
@@ -112,15 +114,19 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
    settings.sample_bits = 16;
    settings.output_rate = 48000;
    settings.resample_quality = 2;
+   settings.batch_size = 32768;
    
    int opt;
    double fft_resolution = 100;
    
    // Need to accept rtl_power-style args.
    // Example: rtl_power -f 400400000:403500000:800 -i20 -1 -c 20% -p 0 -d 0 -g 26.0 log_power.csv
-	while ((opt = getopt(argc, argv, "b:c:d:e:f:F:g:i:j:M:n:p:q:r:s:h1")) != -1) {
-		switch (opt) {
-		case 'b': // sample_bits
+   while ((opt = getopt(argc, argv, "a:b:c:d:e:f:F:g:i:j:M:n:p:q:r:s:h1")) != -1) {
+      switch (opt) {
+      case 'a': // batch size
+         settings.batch_size = atoi(optarg);
+         break;
+      case 'b': // sample_bits
          settings.sample_bits = atoi(optarg);
          if( settings.sample_bits != 8 && settings.sample_bits != 16 ) {
             std::cerr << "sample bits value " << optarg << " must be 8 or 16\n";
@@ -395,7 +401,6 @@ void fft_work_thread( ss_client_if& server,
 
 int main(int argc, char* argv[]) {
 
-   const unsigned int batch_sz = 32768;
    unsigned int rxd = 0;
    SettingsT settings;
    // resampler support   
@@ -407,6 +412,8 @@ int main(int argc, char* argv[]) {
 
    parse_args(argc, argv, settings);
       
+   const unsigned int batch_sz = settings.batch_size;
+
    ss_client_if server (settings.server, settings.port, settings.do_iq, settings.do_fft, settings.fft_bins, settings.sample_bits);
 
    // Get sample rate info and decide which one to ask for; set up resampler if needed
@@ -444,12 +451,26 @@ int main(int argc, char* argv[]) {
          << resample_ratio << std::endl;
    }
 
+   // It appears we have to send a decimation stage command to get a
+   // client sync block with the correct min/max IQ bounds. If we omit
+   // this call, the min/center/max IQ are all the same and setting the freq
+   // other than to the center is not possible.
+   if(!server.set_sample_rate_by_decim_stage(desired_decim_stage)) {
+      std::cerr << "Failed to set sample rate " << desired_decim_stage << "\n";
+      exit(1);
+   }
+
+   // Hack to let the client sync block come back from the spyserver.
+   //TODO: Implement flag-based wait for next client sync block in ss_client_if
+   std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+
    std::cerr << "ss_client: setting center_freq to " << settings.center_freq << std::endl;
    if(!server.set_center_freq(settings.center_freq)) {
       std::cerr << "Failed to set freq\n";
       exit(1);
    }
 
+//   std::cerr << "ss_client: setting decimation to 2^" << desired_decim_stage << std::endl;
    if(!server.set_sample_rate_by_decim_stage(desired_decim_stage)) {
       std::cerr << "Failed to set sample rate " << desired_decim_stage << "\n";
       exit(1);
