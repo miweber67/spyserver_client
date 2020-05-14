@@ -632,7 +632,14 @@ void ss_client_if::process_int16_samples() {
 
    int16_t *sample = (int16_t *)body_buffer;
 
-//   std::cerr << "IN: tail\t" << m_fifo_tail << "\thead\t" << m_fifo_head << "\tfree\t" << fifo_free() << std::endl;
+/*
+   std::cerr << "IN: "
+             << header.BodySize << "B "
+             << header.BodySize / 2 / 2 << " samps\ttail\t" 
+             << m_fifo_tail << "\thead\t" 
+             << m_fifo_head << "\tfree\t" 
+             << fifo_free() << std::endl;
+*/
    
    // check for overflow
    if( fifo_free() < header.BodySize ) {
@@ -668,7 +675,7 @@ void ss_client_if::process_int16_samples() {
    // in all cases, head is now here:   
    m_fifo_head = (m_fifo_head + header.BodySize) % m_fifo_size;
    
-//   std::cerr << "    tail\t" << m_fifo_tail << "\thead\t" << m_fifo_head << "\tfree\t" << fifo_free() << std::endl;
+//   std::cerr << "after in:    tail\t" << m_fifo_tail << "\thead\t" << m_fifo_head << "\tfree\t" << fifo_free() << std::endl;
 
    _fifo_lock.unlock();
    _samp_avail.notify_one();
@@ -695,14 +702,16 @@ bool ss_client_if::set_sample_rate_by_decim_stage(const uint32_t decim_stage) {
       }
    }
    
+//   std::cerr << "Requested stage: " << decim_stage << "   --> index: " << requested_idx << std::endl;
+   
    if( requested_idx >= _sample_rates.size() ) {
       std::cerr << "SS_client_if: Decimation stage not supported: " << decim_stage << std::endl;
       std::cerr << "SS_client_if: Supported Sample Rates: " << std::endl;
       for (std::pair<double, uint32_t> sr: _sample_rates) {
          std::cerr << "SS_client_if:   " << sr.first << "\t\t" << sr.second << std::endl;
       }
-      std::stringstream ss ("Unsupported decimation stage: ");
-      ss << decim_stage;
+      std::stringstream ss;
+      ss << "Unsupported decimation stage: " << decim_stage;
       throw std::runtime_error( ss.str() );   
    }
 
