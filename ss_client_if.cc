@@ -351,7 +351,9 @@ void ss_client_if::parse_message(char *buffer, uint32_t len) {
       len -= consumed;
 
       if (parser_phase == AcquiringHeader) {
-        if (header.MessageType >= MSG_TYPE_UINT8_IQ && header.MessageType <= MSG_TYPE_FLOAT_IQ) {
+        // fft messages all have sequence number of 0, so can't check.
+        // if IQ wasn't requested, some still appear, but not all, so don't check
+        if (m_do_iq && header.MessageType >= MSG_TYPE_UINT8_IQ && header.MessageType <= MSG_TYPE_FLOAT_IQ) {
           int32_t gap = header.SequenceNumber - last_sequence_number - 1;
           last_sequence_number = header.SequenceNumber;
           dropped_buffers += gap;
