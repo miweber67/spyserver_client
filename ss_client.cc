@@ -9,6 +9,14 @@
 #include "tcp_client.h"
 #include "ss_client_if.h"
 
+// TODO:
+// * Fix fft edge processing;
+// * Does sample rate affect delivered fft data from server?
+//     - yes, it affects the number of points delivered, but not the report interval
+
+
+
+
 typedef struct settings {
    double low_freq;
    double high_freq;
@@ -97,6 +105,8 @@ void parse_freq_arg(SettingsT& settings, double& fft_res, char* arg) {
 void parse_args(int argc, char* argv[], SettingsT& settings) {
 
    settings.center_freq = 403000000;
+   settings.low_freq = 0;
+   settings.high_freq = 0;
    settings.sample_rate = 10000000;
    settings.fft_sample_rate = 10000000;
    settings.gain = 20;
@@ -286,6 +296,14 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
       settings.fft_bins = max;
    }
 
+   // Provide default low/high equal to BW for fft processing method 
+   if( 0 == settings.low_freq ) {
+      settings.low_freq = settings.center_freq - (settings.sample_rate / 2.0);
+   }
+   if( 0 == settings.high_freq ) {
+      settings.high_freq = settings.center_freq + (settings.sample_rate / 2.0);    
+   }
+
 //   std::cerr << "bits for bins: " << std::ceil(std::log2(bins_for_res)) << std::endl;
    std::cerr << "bins for res: " << bins_for_res << "   fft bins: " << settings.fft_bins << "   resolution: "
       << settings.sample_rate / settings.fft_bins << "Hz" << std::endl;
@@ -317,8 +335,9 @@ void fft_work_thread( ss_client_if& server,
    uint32_t bandwidth = server.get_bandwidth();
    double last_start = get_monotonic_seconds();
 
-    while( running ) {
-   
+   std::cerr.precision(15);
+
+   while( running ) {
       server.get_fft_data( fft_data, periods );
       
       // TODO: Configure fft bins in source interface and these sizes up front
@@ -345,15 +364,23 @@ void fft_work_thread( ss_client_if& server,
          double hz_low = fft_hz_low;
          double hz_high = fft_hz_high;
 
+         std::cerr << "hz_low init to " << hz_low << std::endl;
+         
          if( hz_low < settings.low_freq ) {
             unsigned int lowsteps = std::ceil((settings.low_freq - fft_hz_low) / hz_step);
             hz_low = fft_hz_low + (hz_step * lowsteps);
-            std::cerr << "lowsteps: " << lowsteps << "\n";
+            std::cerr << "settings.low_freq: " << settings.low_freq << "   lowsteps: " << lowsteps << "\n";
+            std::cerr << "hz_low adj to " << hz_low << std::endl;
          }
          if( hz_high > settings.high_freq ) {
             unsigned int highsteps = std::ceil((settings.high_freq - fft_hz_low) / hz_step);
             hz_high = fft_hz_low + (hz_step * highsteps);
-            std::cerr << "highsteps: " << highsteps << "\n";
+            std::cerr << "settings.high_freq: " << settings.high_freq
+                << "   fft_hz_low: " << fft_hz_low
+                << "   highsteps: " << highsteps
+                << "   hz_step: " << hz_step
+                << "   hz_high: " << hz_high
+                << "\n";
          }
 
          // dump to output file
@@ -366,22 +393,45 @@ void fft_work_thread( ss_client_if& server,
                  << hz_step << ", "
                  << "1";
 
+#define DEBUG_FFT_OUTPUT 1
+#if DEBUG_FFT_OUTPUT
+         std::ofstream outfile_unfilt ("log_power_unfiltered.csv");
+         outfile_unfilt << "date, time, " << (unsigned int)hz_low << ", "
+                 << (unsigned int)hz_high << ", "
+                 << hz_step << ", "
+                 << "1";
+#endif
+
          size_t num_pts = fft_data_sums.size();
          std::cerr << "processing " << num_pts << " points from " << fft_hz_low
-                   << " to " << fft_hz_high;
+                   << " to " << fft_hz_high << std::endl;
+         
+         int dumped = 0;
+         int skipped = 0;
          
          for (size_t i = 0; i < num_pts; ++i)
          {
             double cur_hz = fft_hz_low + (hz_step * i);
+            //std::cerr << "hz_low: " << hz_low << " cur_hz: " << cur_hz << " hz_high:" << hz_high;
+#if DEBUG_FFT_OUTPUT
+            outfile_unfilt << ", " << (fft_data_sums[i] / sum_periods);
+#endif
             if( cur_hz >= hz_low && cur_hz <= hz_high ) {
                outfile << ", " << (fft_data_sums[i] / sum_periods);
+               ++dumped;
             } else {
                // nop
+               ++skipped;
             }
             fft_data_sums[i] = 0;
          }
          outfile << std::endl;
+#if DEBUG_FFT_OUTPUT
+         outfile_unfilt << std::endl;
+#endif
 
+         std::cerr << "dumped: " << dumped << " skipped: " << skipped << std::endl;
+         
          sum_periods = 0;
          last_start = now;
          
@@ -390,12 +440,14 @@ void fft_work_thread( ss_client_if& server,
             running = false;         
          }
 
-//         std::cerr << "log file updated" << std::endl;
+         std::cerr << "fft log file updated" << std::endl;
       
+      } else {
+        // std::cerr << "haven't integrated fft long enough, waiting for more..." << std::endl;
       }
       
    }
-//   std::cerr << "fft_work_thread ending\n";
+   std::cerr << "fft_work_thread ending\n";
 
 }
 
@@ -561,6 +613,7 @@ int main(int argc, char* argv[]) {
             rxd += data.output_frames_gen;
             
             out->write(buf, data.output_frames_gen*2*2);
+            out->flush();
 //            std::cerr << "w16 " << std::flush;
          }
       } else {
@@ -569,6 +622,7 @@ int main(int argc, char* argv[]) {
          while(settings.samples == 0 || rxd < settings.samples) {
             rxd += server.get_iq_data(batch_sz,(uint8_t*)data);
             out->write(data, batch_sz*2);
+            out->flush();
 //            std::cerr << "w8 " << std::flush;
          }
       }

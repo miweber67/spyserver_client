@@ -18,6 +18,8 @@
 #include "spyserver_protocol.h"
 
 
+extern double get_monotonic_seconds();
+
 ss_client_if::ss_client_if (const std::string _ip,
                             const int         _port,
                             const uint8_t     _do_iq,
@@ -191,7 +193,7 @@ void ss_client_if::on_connect()
    set_setting(SETTING_STREAMING_MODE, { streaming_mode });
    
    if( m_do_fft ) {
-      set_setting(SETTING_FFT_DISPLAY_PIXELS, { m_fft_bins });
+//      set_setting(SETTING_FFT_DISPLAY_PIXELS, { m_fft_bins });
       set_setting(SETTING_FFT_DB_OFFSET, { 0x00 });
       set_setting(SETTING_FFT_DB_RANGE,  { 0x7f });
    }
@@ -351,7 +353,9 @@ void ss_client_if::parse_message(char *buffer, uint32_t len) {
       len -= consumed;
 
       if (parser_phase == AcquiringHeader) {
-        if (header.MessageType >= MSG_TYPE_UINT8_IQ && header.MessageType <= MSG_TYPE_FLOAT_IQ) {
+        // fft messages all have sequence number of 0, so can't check.
+        // if IQ wasn't requested, some still appear, but not all, so don't check
+        if (m_do_iq && header.MessageType >= MSG_TYPE_UINT8_IQ && header.MessageType <= MSG_TYPE_FLOAT_IQ) {
           int32_t gap = header.SequenceNumber - last_sequence_number - 1;
           last_sequence_number = header.SequenceNumber;
           dropped_buffers += gap;
@@ -371,15 +375,17 @@ int ss_client_if::parse_header(char *buffer, uint32_t length) {
   while (length > 0) {
     int to_write = std::min((uint32_t)(sizeof(MessageHeader) - parser_position), length);
     std::memcpy(&header + parser_position, buffer, to_write);
-/*    
+
+#if 0    
     std::cerr << "Header:"
               << "\n   ProtocolID:     " << std::hex << header.ProtocolID
               << "\n   MessageType:     " << header.MessageType
               << "\n   StreamType:     " << std::dec << header.StreamType
               << "\n   SequenceNumber:     " << header.SequenceNumber
               << "\n   BodySize:     " << std::hex << header.BodySize
+              << std::dec
               << std::endl;
-*/
+#endif
 
     length -= to_write;
     buffer += to_write;
@@ -537,7 +543,7 @@ void ss_client_if::process_client_sync() {
 
   std::cerr << "\n**********\nClient sync:"
             << std::dec
-            << "\n   Control:     " << (m_cur_client_sync.CanControl == 1 ? "Yes" : "No")
+            << "\n   Control:     " << (m_cur_client_sync.CanControl == 1 ? "Allowed" : "Not allowed")
             << "\n   gain:        " << m_cur_client_sync.Gain
             << "\n   dev_ctr:     " << m_cur_client_sync.DeviceCenterFrequency
             << "\n   ch_ctr:      " << m_cur_client_sync.IQCenterFrequency
@@ -702,7 +708,7 @@ bool ss_client_if::set_sample_rate_by_decim_stage(const uint32_t decim_stage) {
       }
    }
    
-//   std::cerr << "Requested stage: " << decim_stage << "   --> index: " << requested_idx << std::endl;
+   std::cerr << "Requested stage: " << decim_stage << "   --> index: " << requested_idx << std::endl;
    
    if( requested_idx >= _sample_rates.size() ) {
       std::cerr << "SS_client_if: Decimation stage not supported: " << decim_stage << std::endl;
@@ -736,12 +742,15 @@ bool ss_client_if::set_sample_rate_by_index(uint32_t requested_idx) {
    if( m_do_fft ) {
          m_fft_sample_rate = sampleRate;
          set_setting(SETTING_FFT_DECIMATION, {_sample_rates[requested_idx].second} );
-//         std::cerr << "SS_client_if: Setting FFT sample rate to " << (unsigned int)m_fft_sample_rate << std::endl;
+         std::cerr << "SS_client_if: Setting FFT sample rate to "
+            << (unsigned int)m_fft_sample_rate
+            << " stage " << _sample_rates[requested_idx].second
+            << std::endl;
    }
 
    if( m_do_iq ) {
-//         std::cerr << "SS_client_if: Setting IQ sample rate to " << sampleRate
-//            << " stage " << _sample_rates[requested_idx].second << std::endl;
+         std::cerr << "SS_client_if: Setting IQ sample rate to " << sampleRate
+            << " stage " << _sample_rates[requested_idx].second << std::endl;
          channel_decimation_stage_count = _sample_rates[requested_idx].second;
          set_setting(SETTING_IQ_DECIMATION, {channel_decimation_stage_count});
          
@@ -884,9 +893,20 @@ void ss_client_if::process_uint8_fft() {
 
    size_t num_pts = header.BodySize;
    uint8_t* val = (uint8_t*)body_buffer;
+   double now = get_monotonic_seconds();
 
-//   std::cerr << "Got " << num_pts << " FFT points\n";
-
+   // debug stuff
+   static double last_call = 0;
+   double rate = 0;
+   if( 0 < last_call ) {
+      rate = 1 / (now - last_call);
+   }
+   last_call = now;
+   std::cerr << "process_uint8_fft: rx " << num_pts << " points; delivery rate "
+      << rate << "Hz" << std::endl;
+   // end debug stuff
+   
+   
    m_fft_data_lock.lock();
    for (size_t i = 0; i < num_pts; ++i)
    {
@@ -1051,7 +1071,7 @@ double ss_client_if::set_gain( double gain, size_t chan )
     _gain = gain;
     set_setting(SETTING_GAIN, {(uint32_t)gain});
   } else {
-    std::cerr << "SS_client_if: The server does not allow you to change the gains." << std::endl;
+    std::cerr << "SS_client_if: The server does not allow us to change the gains." << std::endl;
   }
 
   return _gain;
