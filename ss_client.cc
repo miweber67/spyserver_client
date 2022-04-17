@@ -290,6 +290,13 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
    // adjust fft size to provide requested resolution
    int bins_for_res =  settings.sample_rate / fft_resolution;
    settings.fft_bins = std::pow(2, std::ceil(std::log2(bins_for_res)));
+
+//   settings.fft_bins = 256;
+//   settings.fft_bins = 4096;
+//   settings.fft_bins = 32768;
+//   settings.fft_bins = 8192;
+
+
    // max bins spyserver allows
    const int max = 32768;
    if( settings.fft_bins > max ) {
@@ -466,7 +473,12 @@ int main(int argc, char* argv[]) {
       
    const unsigned int batch_sz = settings.batch_size;
 
-   ss_client_if server (settings.server, settings.port, settings.do_iq, settings.do_fft, settings.fft_bins, settings.sample_bits);
+   ss_client_if server (settings.server,
+                        settings.port,
+                        settings.do_iq,
+                        settings.do_fft,
+                        settings.fft_bins,
+                        settings.sample_bits);
 
    // Get sample rate info and decide which one to ask for; set up resampler if needed
    uint32_t max_samp_rate;

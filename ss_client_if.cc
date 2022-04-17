@@ -193,7 +193,7 @@ void ss_client_if::on_connect()
    set_setting(SETTING_STREAMING_MODE, { streaming_mode });
    
    if( m_do_fft ) {
-//      set_setting(SETTING_FFT_DISPLAY_PIXELS, { m_fft_bins });
+      set_setting(SETTING_FFT_DISPLAY_PIXELS, { m_fft_bins });
       set_setting(SETTING_FFT_DB_OFFSET, { 0x00 });
       set_setting(SETTING_FFT_DB_RANGE,  { 0x7f });
    }

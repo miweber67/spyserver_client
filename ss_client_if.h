@@ -162,6 +162,8 @@ private:
    std::vector< std::pair<double, uint32_t> > _sample_rates;
    double m_iq_sample_rate;
    double m_fft_sample_rate;
+   double m_iq_decim;
+   double m_fft_decim;
    double _center_freq;
    double _gain;
    double _digitalGain;
