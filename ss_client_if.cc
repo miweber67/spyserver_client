@@ -901,9 +901,9 @@ void ss_client_if::process_uint8_fft() {
    if( 0 < last_call ) {
       rate = 1 / (now - last_call);
    }
+   std::cerr << "process_uint8_fft: rx " << num_pts << " points; time since last pkt: "
+      << (now - last_call) << std::endl;
    last_call = now;
-   std::cerr << "process_uint8_fft: rx " << num_pts << " points; delivery rate "
-      << rate << "Hz" << std::endl;
    // end debug stuff
    
    
