@@ -897,10 +897,6 @@ void ss_client_if::process_uint8_fft() {
 
    // debug stuff
    static double last_call = 0;
-   double rate = 0;
-   if( 0 < last_call ) {
-      rate = 1 / (now - last_call);
-   }
    std::cerr << "process_uint8_fft: rx " << num_pts << " points; time since last pkt: "
       << (now - last_call) << std::endl;
    last_call = now;
