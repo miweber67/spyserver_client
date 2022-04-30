@@ -97,6 +97,8 @@ void parse_freq_arg(SettingsT& settings, double& fft_res, char* arg) {
 void parse_args(int argc, char* argv[], SettingsT& settings) {
 
    settings.center_freq = 403000000;
+   settings.low_freq = 0;
+   settings.high_freq = 0;
    settings.sample_rate = 10000000;
    settings.fft_sample_rate = 10000000;
    settings.gain = 20;
@@ -115,10 +117,10 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
    settings.output_rate = 48000;
    settings.resample_quality = 2;
    settings.batch_size = 32768;
-   
+
    int opt;
    double fft_resolution = 100;
-   
+
    // Need to accept rtl_power-style args.
    // Example: rtl_power -f 400400000:403500000:800 -i20 -1 -c 20% -p 0 -d 0 -g 26.0 log_power.csv
    while ((opt = getopt(argc, argv, "a:b:c:d:e:f:F:g:i:j:M:n:p:q:r:s:h1")) != -1) {
@@ -274,7 +276,7 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
    if( 0 == strcmp(settings.samples_outfilename, settings.fft_outfilename) ) {
       std::cerr << "Refusing to emit both samples and fft data to the same output stream! :-p\n";
       usage(argv[0]);
-      exit(1);      
+      exit(1);
    }
 
    // adjust fft size to provide requested resolution
@@ -284,6 +286,14 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
    const int max = 32768;
    if( settings.fft_bins > max ) {
       settings.fft_bins = max;
+   }
+
+   // Provide default low/high equal to BW for fft processing method
+   if( 0 == settings.low_freq ) {
+      settings.low_freq = settings.center_freq - (settings.sample_rate / 2.0);
+   }
+   if( 0 == settings.high_freq ) {
+      settings.high_freq = settings.center_freq + (settings.sample_rate / 2.0);
    }
 
 //   std::cerr << "bits for bins: " << std::ceil(std::log2(bins_for_res)) << std::endl;
