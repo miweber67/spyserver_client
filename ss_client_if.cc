@@ -823,7 +823,8 @@ bool ss_client_if::set_iq_center_freq(double centerFrequency, size_t chan) {
       std::cerr << "SS_client_if: Requested center IQ freq " << (centerFrequency/1e6)
          << " outside device supported range: " << (unsigned int)device_info.MinimumFrequency
          << " - " << (unsigned int)device_info.MaximumFrequency << std::endl;
-      return m_cur_client_sync.DeviceCenterFrequency;
+      // return m_cur_client_sync.DeviceCenterFrequency;
+      return false;
    }
 
    // If we don't have control, requested center must be within bounds
@@ -833,7 +834,8 @@ bool ss_client_if::set_iq_center_freq(double centerFrequency, size_t chan) {
          std::cerr << "SS_client_if: Requested center IQ freq " << (centerFrequency/1e6)
             << " outside currently allowed range: " << m_cur_client_sync.MinimumIQCenterFrequency 
             << " - " << m_cur_client_sync.MaximumIQCenterFrequency << std::endl;
-         return m_cur_client_sync.IQCenterFrequency;
+         // return m_cur_client_sync.IQCenterFrequency;
+         return false;
       }
    }
 
@@ -853,7 +855,7 @@ bool ss_client_if::set_fft_center_freq(double centerFrequency, size_t chan) {
 
    if( centerFrequency < device_info.MinimumFrequency || 
        centerFrequency > device_info.MaximumFrequency) {
-      std::cerr << "SS_client_if: Requested center FFT freq " << (centerFrequency/1e6)
+      std::cerr << "SS_client_if: Requested center FFT freq " << centerFrequency
          << " outside device supported range: " << (unsigned int)device_info.MinimumFrequency
          << " - " << (unsigned int)device_info.MaximumFrequency << std::endl;
       return false;
@@ -863,7 +865,7 @@ bool ss_client_if::set_fft_center_freq(double centerFrequency, size_t chan) {
    if( m_cur_client_sync.CanControl == 0 ) {
       if( (centerFrequency < m_cur_client_sync.MinimumFFTCenterFrequency || 
            centerFrequency > m_cur_client_sync.MaximumFFTCenterFrequency) ) {
-         std::cerr << "SS_client_if: Requested center FFT freq " << (centerFrequency/1e6)
+         std::cerr << "SS_client_if: Requested center FFT freq " << centerFrequency
             << " outside currently allowed range: " << m_cur_client_sync.MinimumFFTCenterFrequency 
             << " - " << m_cur_client_sync.MaximumFFTCenterFrequency << std::endl;
          return false;
@@ -1020,11 +1022,6 @@ double ss_client_if::get_sample_rate()
    return 0;
 }
 
-double ss_client_if::get_center_freq( size_t chan )
-{
-  return _center_freq;
-}
-
 std::vector<std::string> ss_client_if::get_gain_names( size_t chan )
 {
   std::vector< std::string > names;
@@ -1084,6 +1081,22 @@ double ss_client_if::get_gain( const std::string & name, size_t chan )
 
   return get_gain(chan);
 }
+
+uint32_t ss_client_if::get_dev_center_freq()
+{
+   return m_cur_client_sync.DeviceCenterFrequency;
+}
+
+uint32_t ss_client_if::get_iq_center_freq()
+{
+   return m_cur_client_sync.IQCenterFrequency;
+}
+
+uint32_t ss_client_if::get_fft_center_freq()
+{
+   return m_cur_client_sync.FFTCenterFrequency;
+}
+
 
 void ss_client_if::send_stream_format_commands() {
    if( m_do_fft ) {

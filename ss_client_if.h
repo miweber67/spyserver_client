@@ -67,8 +67,9 @@ public:
    bool set_fft_center_freq( double freq, size_t chan = 0 );
    // return the bandwidth used for fft range
    uint32_t get_bandwidth();
-   // which would this return? TODO: fix
-   double get_center_freq( size_t chan = 0 );
+   uint32_t get_dev_center_freq();
+   uint32_t get_iq_center_freq();
+   uint32_t get_fft_center_freq();
 
    std::vector<std::string> get_gain_names( size_t chan = 0 );
    bool set_gain_mode( bool automatic, size_t chan = 0 );

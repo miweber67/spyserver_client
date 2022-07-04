@@ -1,4 +1,5 @@
 #include <iostream>
+#include <iomanip> // setprecision
 #include <fstream>
 #include <string>
 
@@ -31,6 +32,7 @@ typedef struct settings {
    uint32_t output_rate;
    uint32_t resample_quality;
    uint32_t batch_size;
+   bool accept_mismatched_center;
    
 } SettingsT;
 
@@ -52,7 +54,7 @@ void usage(char* appname) {
    if(!printed) {
       std::cout << "Usage: " << appname << " [-options] <mode> [iq_outfile] [fft_outfile]\n"
                 << "\n  mode: one of  iq | fft | both"
-                << "\n  -f <center frequency>"
+                << "\n  -f <center frequency> or <low_hz:high_hz:fft_res>"
                 << "\n  -s <sample_rate>"
                 << "\n  [-a <data batch size, default 32768, shorter dumps collected data more often>]"
 //                << "\n  [-b <bits>, '8' or '16', default 16; 8 is EXPERIMENTAL]"
@@ -64,6 +66,7 @@ void usage(char* appname) {
                 << "\n  [-r <server>]"
                 << "\n  [-q <port>]"
                 << "\n  [-n <num_samples>]"
+                << "\n  [-o] accept mismatched center frequency from locked spyserver"
                 << "\n  [<iq outfile name>] ( '-' for stdout; optional, but must be specified if an fft outfilename is also provided)"
                 << "\n  [<fft outfile name>] default log_power.csv"
                 << std::endl
@@ -78,20 +81,31 @@ void parse_freq_arg(SettingsT& settings, double& fft_res, char* arg) {
    std::string s (arg);
    if( s.find(':') != std::string::npos ) {
       std::stringstream ss (s);
-      int low;
-      int high;
-      int res;
-      char c;
-      ss >> low >> c >> high >> c >> res;
-      settings.center_freq = (low + high) / 2;
-      settings.low_freq = low;
-      settings.high_freq = high;
-      fft_res = res;
+      int low = 0;
+      int high = 0;
+      int res = 100;
+      char c1, c2;
+      ss >> low >> c1 >> high >> c2 >> res;
+      if( ':' != c1 ) {
+         std::cerr << "Unexpected frequency separator '" << c1 << "'; use ':'" << std::endl;
+      } else {
+         settings.center_freq = (low + high) / 2;
+         settings.low_freq = low;
+         settings.high_freq = high;
+      }
+      if( ':' == c2 ) {
+         fft_res = res;
+      } else {
+         // allow non-specification of fft resolution
+      }
    } else {
       settings.center_freq = strtod(arg, NULL);
    }
 
-//   std::cerr << "center_freq: " << settings.center_freq << "   fft_res: " << fft_res << std::endl;
+   std::cerr << "center_freq: "
+             << std::setprecision(9) << settings.center_freq
+             << "   fft_res: "
+             << fft_res << std::endl;
 }
 
 void parse_args(int argc, char* argv[], SettingsT& settings) {
@@ -117,13 +131,14 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
    settings.output_rate = 48000;
    settings.resample_quality = 2;
    settings.batch_size = 32768;
-
+   settings.accept_mismatched_center = false;
+   
    int opt;
    double fft_resolution = 100;
 
    // Need to accept rtl_power-style args.
    // Example: rtl_power -f 400400000:403500000:800 -i20 -1 -c 20% -p 0 -d 0 -g 26.0 log_power.csv
-   while ((opt = getopt(argc, argv, "a:b:c:d:e:f:F:g:i:j:M:n:p:q:r:s:h1")) != -1) {
+   while ((opt = getopt(argc, argv, "a:b:c:d:e:f:F:g:i:j:M:n:p:q:r:s:h1o")) != -1) {
       switch (opt) {
       case 'a': // batch size
          settings.batch_size = atoi(optarg);
@@ -171,6 +186,9 @@ void parse_args(int argc, char* argv[], SettingsT& settings) {
 	      break;
       case 'n': // # samples
 	      settings.samples = strtol(optarg, NULL, 0);
+	      break;
+      case 'o': // fOrce accept mismatched centers
+         settings.accept_mismatched_center = true;
 	      break;
       case 'p': // ppm error - not supported
          std::cerr << "-p not currently supported; ignoring\n";
@@ -358,12 +376,12 @@ void fft_work_thread( ss_client_if& server,
          if( hz_low < settings.low_freq ) {
             unsigned int lowsteps = std::ceil((settings.low_freq - fft_hz_low) / hz_step);
             hz_low = fft_hz_low + (hz_step * lowsteps);
-            std::cerr << "lowsteps: " << lowsteps << "\n";
+            //std::cerr << "lowsteps: " << lowsteps << "\n";
          }
          if( hz_high > settings.high_freq ) {
             unsigned int highsteps = std::ceil((settings.high_freq - fft_hz_low) / hz_step);
             hz_high = fft_hz_low + (hz_step * highsteps);
-            std::cerr << "highsteps: " << highsteps << "\n";
+            //std::cerr << "highsteps: " << highsteps << "\n";
          }
 
          // dump to output file
@@ -377,14 +395,16 @@ void fft_work_thread( ss_client_if& server,
                  << "1";
 
          size_t num_pts = fft_data_sums.size();
-         std::cerr << "processing " << num_pts << " points from " << fft_hz_low
-                   << " to " << fft_hz_high;
+//         std::cerr << "processing " << num_pts << " points from " << fft_hz_low
+//                   << " to " << fft_hz_high << std::endl;
          
+//         uint32_t wrote = 0;
          for (size_t i = 0; i < num_pts; ++i)
          {
             double cur_hz = fft_hz_low + (hz_step * i);
             if( cur_hz >= hz_low && cur_hz <= hz_high ) {
                outfile << ", " << (fft_data_sums[i] / sum_periods);
+//               ++wrote;
             } else {
                // nop
             }
@@ -400,7 +420,7 @@ void fft_work_thread( ss_client_if& server,
             running = false;         
          }
 
-//         std::cerr << "log file updated" << std::endl;
+//         std::cerr << "log file updated; wrote " << wrote << " points out of " << fft_data.size() << std::endl;
       
       }
       
@@ -476,8 +496,15 @@ int main(int argc, char* argv[]) {
 
    std::cerr << "ss_client: setting center_freq to " << settings.center_freq << std::endl;
    if(!server.set_center_freq(settings.center_freq)) {
-      std::cerr << "Failed to set freq\n";
-      exit(1);
+      if(settings.accept_mismatched_center) {
+         settings.center_freq = server.get_dev_center_freq();
+         std::cerr << "Warning: Unable to set server frequency. Current server center freq: "
+                   << settings.center_freq
+                   << std::endl;
+      } else {
+         std::cerr << "Failed to set freq, exiting\n";
+         exit(1);
+      }
    }
 
 //   std::cerr << "ss_client: setting decimation to 2^" << desired_decim_stage << std::endl;
